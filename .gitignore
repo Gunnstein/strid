@@ -5,3 +5,4 @@
 !README.rst
 !strid/
 !strid/*.py
+!*.ipynb

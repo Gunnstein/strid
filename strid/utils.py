@@ -1,8 +1,91 @@
 # -*- coding: utf-8 -*-
 import numpy as np
+import scipy.signal
+
+__all__ = ["ShearFrame", "find_rayleigh_damping_coeffs",
+           "get_frequency_vector", "find_modal_assurance_criterion",
+           "find_psd_matrix",]
 
 
-__all__ = ["ShearFrame", ]
+def find_rayleigh_damping_coeffs(freqs, damping_ratios):
+    """Rayleigh damping coefficients from target freqs and damping ratio
+
+    Rayleigh damping is defined by the following relation
+
+        C = a*M + b*K
+
+    where C is the damping matrix, M is the mass matrix and K is the
+    stiffness matrix. The damping ratio `xi` at frequency `f` is then
+    given by the following equation:
+
+       xi = 1/2 * (a/(2*pi*f) + b * (2*pi*f))
+
+    The damping coefficients can be determined by specifying the desired
+    damping ratio at two or more frequencies. The least square method is
+    used to determine the damping ratios.
+
+    Arguments
+    ---------
+    freqs : 1darray
+        Frequencies (rad/s) where the damping ratios are specified
+    damping_ratios : 1darray
+        The damping ratios (c / c_cr) at the specified frequencies.
+    """
+    A = .5 * np.array([[1 / wn, wn]
+                       for wn in freqs])
+    return np.linalg.lstsq(A, damping_ratios, rcond=None)[0]
+
+
+def get_frequency_vector(fs, n):
+    return np.linspace(0., fs/2, n)
+
+
+def find_modal_assurance_criterion(u, v):
+    """Calculate the modal assurance criterion (MAC)
+
+    MAC is the square of the linear correlation between two mode shapes
+    and is a measure of the similarity of two different modes which varies
+    between 0 and 1. MAC=1 means a perfect correlation between two vectors
+    exists, while MAC=0 means no linear correlation.
+
+    Arguments
+    ---------
+    u, v : 1darray
+        Mode shapes to check the MAC for.
+
+    Returns
+    -------
+    float
+        MAC between two vectors u and v.
+    """
+    H = lambda x: np.conjugate(x).T
+    return np.abs(H(u).dot(v))**2 / (H(u).dot(u).real * H(v).dot(v).real)
+
+
+def find_psd_matrix(Y, **kwargs):
+    """Calculate the PSD matrix from the measured data A
+
+    Arguments
+    ---------
+    Y : ndarray
+       Measurement matrix where each row corresponds to the entire time
+       series of a measurement channel.
+    kwargs :
+       All keyword arguments are passed to the scipy.signal.csd,
+       see docstring.
+
+    Returns
+    -------
+    ndarray
+       PSD (n x m x m) matrix where the first dimension refers to the
+       frequency of the psd estimator, see get_frequency_vector, and
+       the second and third dimensions refers to the degree of freedom
+       of the input and output as given in Y.
+    """
+    Pyy = np.array(
+        [[scipy.signal.csd(yi, yj, **kwargs)[1]
+          for yj in Y] for yi in Y]).T
+    return Pyy
 
 
 class ShearFrame(object):
@@ -90,13 +173,17 @@ class ShearFrame(object):
                       for i in range(1, self.n+1)])
         return x / np.abs(x).max()
 
-    @staticmethod
-    def find_rayleigh_coeffs(frequencies, dampingratios):
-        A = np.array([[1 / (2*wn), .5 * wn] for wn in frequencies])
-        return np.linalg.lstsq(A, dampingratios)[0]
-
     def set_rayleigh_damping_matrix(self, freqs, xis):
-        a, b = self.find_rayleigh_coeffs(freqs, xis)
+        """Set the damping matrix to the Rayleigh damping matrix
+
+        Arguments
+        ---------
+        freqs : 1darray
+            Frequencies (rad/s) where the damping ratios are specified
+        damping_ratios : 1darray
+            The damping ratios (c / c_cr) at the specified frequencies.
+        """
+        a, b = find_rayleigh_damping_coeffs(freqs, xis)
         self.C = a*self.M + b*self.K
 
     def find_state_matrix(self):
