@@ -1,0 +1,7 @@
+*
+!.gitignore
+!setup.py
+!LICENSE
+!README.rst
+!strid/
+!strid/*.py
