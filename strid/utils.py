@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import scipy.signal
+import scipy.integrate
 
-__all__ = ["ShearFrame", "find_rayleigh_damping_coeffs",
+__all__ = ["find_rayleigh_damping_coeffs",
            "get_frequency_vector", "find_modal_assurance_criterion",
-           "find_psd_matrix",]
+           "find_psd_matrix", "w2f", "f2w", "norm2", ]
 
 
 def find_rayleigh_damping_coeffs(freqs, damping_ratios):
@@ -34,6 +35,20 @@ def find_rayleigh_damping_coeffs(freqs, damping_ratios):
     A = .5 * np.array([[1 / wn, wn]
                        for wn in freqs])
     return np.linalg.lstsq(A, damping_ratios, rcond=None)[0]
+
+
+def w2f(w):
+    "Convert angular frequency (rad/s) to frequency (Hz)"
+    return w / (2*np.pi)
+
+def f2w(f):
+    "Convert frequency (Hz) to angular frequency (rad/s)"
+    return w * (2*np.pi)
+
+
+def norm2(v):
+    "Return the euler norm (||v||_2) of vector `v`"
+    return np.linalg.norm(v, 2)
 
 
 def get_frequency_vector(fs, n):
@@ -129,7 +144,7 @@ class ShearFrame(object):
         can be determined analytically. The `r`th natural frequency
         of a shear frame is defined by
 
-            f_r = 2 * sqrt(k / m) * sin(p * (2r-1) / 2) / (2n+1)
+            w_r = 2 * sqrt(k / m) * sin(p * (2r-1) / 2) / (2n+1)
 
         and the `i`th element of the `r`th mode shape is defined by
 
@@ -164,14 +179,16 @@ class ShearFrame(object):
         K[-1, -1] = k
         return K
 
-    def find_natural_frequency(self, r):
+    def get_natural_frequency(self, r):
+        "Returns the analytical natural frequency of mode `r`"
         k, m, n = self.k, self.m, self.n
         return 2 * np.sqrt(k / m) * np.sin(np.pi / 2 * (2*r-1) / (2*n+1))
 
-    def find_mode_shape(self, r):
+    def get_mode_shape(self, r):
+        "Returns the analytical mode shape of mode `r`"
         x = np.array([np.sin(i*np.pi*(2*r-1)/(2*self.n+1))
                       for i in range(1, self.n+1)])
-        return x / np.abs(x).max()
+        return x / norm2(x)
 
     def set_rayleigh_damping_matrix(self, freqs, xis):
         """Set the damping matrix to the Rayleigh damping matrix
@@ -186,23 +203,65 @@ class ShearFrame(object):
         a, b = find_rayleigh_damping_coeffs(freqs, xis)
         self.C = a*self.M + b*self.K
 
-    def find_state_matrix(self):
+    @property
+    def state_matrix(self):
         M, C, K = self.M, self.C, self.K
         A11 = -np.linalg.solve(M, C)
         A12 = -np.linalg.solve(M, K)
-        B11 = np.linalg.solve(M, np.eye(M.shape[0]))
         Z = np.zeros_like(M)
         I = np.eye(M.shape[0])
         A = np.r_[np.c_[A11, A12],
                   np.c_[I, Z]]
-        B = np.r_[np.c_[B11, Z],
-                  np.c_[Z, I]]
-        return A, B
+        return A
+    
+    def solve(self, t, F=None, d0=None, v0=None, method="RK45"):
+        """Obtain system response to load and initial conditions. 
+        
+        Solve the system at time points `t` due to loads `F` and with
+        initial displacements `d0` and velocities `v0`.
+        
+        Arguments
+        ---------
+        t : 1darray
+            Time points to evaluate the system response.
+        F : Optional[2darray]
+            Load matrix where each column corresponds to time points in
+            `t` and each row is the load applied to a system dof. Fij is
+            then the load applied to dof `i` at time `j`. Zeros is assumed
+            if None.
+        d0, v0 : Optional[1darray]
+            Initial displacment and velocity vector. Zeros is assumed
+            if None.
+        method : str
+            Defines the solver used to get the system response, see
+            scipy.integrate.solve_ivp.
+            
+        Returns
+        -------
+        A, V, D : 2darray
+            Acceleration, velocity and displacement vector for the system.
+        """
+        A = self.state_matrix
+        
+        d0 = np.zeros(A.shape[0]) if d0 is None else d0
+        v0 = np.zeros(A.shape[0]) if v0 is None else v0
+        x0 = np.r_[v0, d0]
+        
+        if F is None:
+            U = np.zeros((self.n, t.size))
+        else:
+            U = np.linalg.solve(self.M, F)
+            
+        def Bu(ti):
+            return np.array([0.]*self.n + [np.interp(ti, t, u) for u in U])
+                 
+        def dydt(t, x):
+            return A.dot(x) + Bu(t)
+        
+        result = scipy.integrate.solve_ivp(dydt, [t[0], t[-1]], x0, t_eval=t, method=method)
+        X = result.y
+        V = X[:self.n, :]
+        D = X[self.n:, :]
+        Acc = A.dot(X)[:self.n, :] + U
+        return Acc, V, D
 
-    def get_transfer_func(self, w, eigenvalues=None):
-        if eigenvalues is None:
-            A, _ = self.find_state_matrix()
-            eigenvalues, _ = np.linalg.eig(A)
-        D = lambda s: 1 / np.prod(np.complex(imag=s)-eigenvalues)
-        G = np.array([np.abs(D(wi)) for wi in w])
-        return G

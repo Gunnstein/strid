@@ -2,7 +2,7 @@
 strid
 =====
 
-Python package for system identification and simulation of structural
+Python package for system identification of structural
 engineering systems.
 
 
