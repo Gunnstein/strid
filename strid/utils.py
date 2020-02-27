@@ -188,11 +188,11 @@ class ShearFrame(object):
 
     def find_state_matrix(self):
         M, C, K = self.M, self.C, self.K
-        A11 = -np.linalg.solve(M, C)
-        A12 = -np.linalg.solve(M, K)
-        B11 = np.linalg.solve(M, np.eye(M.shape[0]))
         Z = np.zeros_like(M)
         I = np.eye(M.shape[0])
+        A11 = -np.linalg.solve(M, C)
+        A12 = -np.linalg.solve(M, K)
+        B11 = np.linalg.solve(M, I)
         A = np.r_[np.c_[A11, A12],
                   np.c_[I, Z]]
         B = np.r_[np.c_[B11, Z],
