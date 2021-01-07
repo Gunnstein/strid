@@ -36,7 +36,9 @@ The code example below shows how the vibration modes of a combined
 deterministic-stochastic system can be obtained from measurements of the
 input `u` and the output `y`.
 
-.. python::
+
+.. code:: python
+
    # ..
    # Assume that the measured input u and output y is available
    #
