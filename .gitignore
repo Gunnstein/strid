@@ -5,4 +5,6 @@
 !README.rst
 !strid/
 !strid/*.py
-!*.ipynb
+!examples/
+!examples/*.ipynb
+!exmaples/*.png

@@ -19,7 +19,7 @@ setup(
     version=version,
     author='Gunnstein T. Frøseth',
     author_email='gunnstein@mailbox.org',
-    description='System identification and simulation of structural engineering systems',
+    description='System identification of structural engineering systems',
     license='ISC',
     long_description=long_description,
     long_description_content_type="text/x-rst",
@@ -31,4 +31,4 @@ setup(
         "Programming Language :: Python",
         "Topic :: Scientific/Engineering",
         ],
-    install_requires=["numpy"])
+    install_requires=["numpy", "scipy"])

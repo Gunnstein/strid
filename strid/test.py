@@ -3,7 +3,6 @@ import numpy as np
 import unittest
 
 from .utils import ShearFrame, find_rayleigh_damping_coeffs
-from ._integration import GeneralizedSystem
 from . import *
 
 np.random.seed(2)
@@ -65,58 +64,6 @@ class TestUtils(unittest.TestCase):
         xis_approx = .5*(a/ws + b*ws)
         np.testing.assert_almost_equal(xis, xis_approx)
 
-
-class TestIntegrator(unittest.TestCase):
-    def setUp(self):
-        self.system = ShearFrame(5, 1e3, 1e6)
-        M, C, K = self.system.M, self.system.C, self.system.K
-        self.generalized_system = GeneralizedSystem(M, C, K)
-
-        # F = np.zeros((M.shape[0], 1000)) + 100000
-        F = np.random.normal(size=(M.shape[0], 1000)) * 100000 + 24000
-        dt = 1/500.
-        v0 = np.zeros(M.shape[0])
-        d0 = self.system.find_mode_shape(1)
-        A, V, D = generalized_alpha_method(M, C, K, F, dt, d0, v0)
-        self.A = A
-        self.V = V
-        self.D = D
-
-    def test_Kdyn(self):
-        true = np.array(
-            [[ 5500., -2500.,     0.,     0.,     0.,],
-             [-2500.,  5500., -2500.,     0.,     0.,],
-             [    0., -2500.,  5500., -2500.,     0.,],
-             [    0.,     0., -2500.,  5500., -2500.,],
-             [    0.,     0.,     0., -2500.,  3000.,],])
-        np.testing.assert_almost_equal(self.generalized_system.Kdyn(.1), true)
-
-    def test_Mf(self):
-        true = np.eye(5)*500.
-        np.testing.assert_equal(self.generalized_system.Mf(.1), true)
-
-    def test_Cf(self):
-        true = np.array(
-            [[100000., -50000.,      0.,      0.,      0.,],
-             [-50000., 100000., -50000.,      0.,      0.,],
-             [     0., -50000., 100000., -50000.,      0.,],
-             [     0.,      0., -50000., 100000., -50000.,],
-             [     0.,      0.,      0., -50000.,  50000.,],])
-        np.testing.assert_equal(self.generalized_system.Cf(.1), true)
-
-    def test_Kf(self):
-        np.testing.assert_equal(self.generalized_system.Kf(.1), self.system.K)
-
-    def test_D(self):
-        true = self.system.find_mode_shape(1)
-        np.testing.assert_equal(true, self.D[:, 0])
-        true = np.array([0.06143933, 0.14867399, 0.16715818,
-                         0.26068709, 0.20816236])
-        np.testing.assert_almost_equal(true, self.D[:, 800], decimal=6)
-
-    def test_V(self):
-        true = np.zeros(5)
-        np.testing.assert_equal(true, self.V[:, 0])
 
 if __name__ == "__main__":
     unittest.main()
