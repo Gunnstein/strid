@@ -140,7 +140,7 @@ class StabilizationDiagram:
     picked_edgecolor = 'k'
     picked_markersize_factor = 2
 
-    def __init__(self):
+    def __init__(self, figure_name="Stabilization Diagram"):
         """Stabilization diagram with a table of picked modes
 
         Stabilization diagram with plot for the modes and a table
@@ -154,7 +154,7 @@ class StabilizationDiagram:
 
         Plot modes with the `plot` method.
         """
-        self.figure = plt.figure("Stabilization diagram", figsize=self.figsize,
+        self.figure = plt.figure(figure_name, figsize=self.figsize,
                                  dpi=self.dpi)
         self.gridspec = self.figure.add_gridspec(nrows=2, ncols=1, wspace=0.15,
                                                  hspace=0.3)

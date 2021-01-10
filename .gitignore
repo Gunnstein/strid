@@ -3,8 +3,8 @@
 !setup.py
 !LICENSE
 !README.rst
+!example.png
 !strid/
 !strid/*.py
 !examples/
 !examples/*.ipynb
-!examples/*.png

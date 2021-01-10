@@ -1,26 +1,19 @@
 # -*- coding:utf-8 -*-
 """
-Implementation of deterministic, stochastic and combined subspace identification methods
-
-The implementation and terminology is based on the following resources
-
-References
-----------
-
-[Overschee1996] Van Overschee, P., De Moor, B.,
-    Subspace Identification for Linear Systems.
-    Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
-
-[Rainieri2014] Rainieri, C., Fabbrocino, G., 2014. Operational Modal Analysis of
-    Civil Engineering Structures. Springer. doi: 10.1007/978-1-4939-0767-0
+Implementation of stochastic and combined deterministic-stochastic subspace
+identification methods
 """
 import abc
 import functools
 import numpy as np
 import scipy.linalg
+from .utils import find_psd_matrix, get_frequency_vector
 
 
-__all__ = ["CombinedDeterministicStochasticSID", ]
+__all__ = ["CombinedDeterministicStochasticSID",
+           "DataDrivenStochasticSID",
+           "CovarianceDrivenStochasticSID",
+           "AbstractReferenceBasedStochasticSID"]
 
 
 def create_block_hankel_matrix(data, block_rows, ncols=None):
@@ -52,9 +45,449 @@ def create_block_hankel_matrix(data, block_rows, ncols=None):
     return 1/np.sqrt(j)*H
 
 
-class BaseSID(abc.ABC):
+class AbstractReferenceBasedStochasticSID(abc.ABC):
     @abc.abstractmethod
-    def __init__(self, u, y):
+    def __init__(self, y, fs, ix_references=None):
+        """Subspace identificator
+
+        Arguments
+        ---------
+        y : 2darray
+            Output data matrix (l x s) from `l` outputs with `s` samples.
+        fs : float
+            Sampling rate
+        ix_references : Optional[list]
+            Indices to the reference outputs in y. If `None`, all outputs
+            are considered to be references.
+        """
+        self.y = y
+        self.fs = fs
+        self.ix_references = ix_references or [*range(self.l)]
+
+    @abc.abstractmethod
+    def perform(self, *args, **kwargs):
+        pass
+
+    def psdy(self, return_trace=False, **kw):
+        """Compute power spectral density matrix of outputs
+
+        Compute the power spectral density matrix of the outputs
+        with Welch's method.
+
+        Arguments
+        ---------
+        return_trace : Optional[bool]
+            Return the entire psd matrix or only the trace of the psd matrix.
+        kw : dict
+            See keywords to scipy.signal.csd and scipy.signal.welch.
+
+        Returns
+        -------
+        f : 1darray
+            Frequency vector of the psd matrix
+        Pyy : 3darray or 1darray
+            Output PSD matrix where the first dimension refers to the
+            frequency of the psd estimator, see get_frequency_vector,
+            and the second and third dimensions refers to the degree
+            of freedom of the input and output as given in y. If
+            return_trace, the trace of the psd matrix is returned
+            instead of the entire psd matrix.
+        """
+        psd = find_psd_matrix(self.y, fs=self.fs, **kw)
+        f = get_frequency_vector(self.fs, psd.shape[0])
+        if return_trace:
+            out = np.trace(psd, axis1=1, axis2=2)
+        else:
+            out = psd
+        return f, out
+
+    @property
+    def yref(self):
+        return self.y[self.ix_references]
+
+    @property
+    def l(self):
+        return self.y.shape[0]
+
+    @property
+    def r(self):
+        return len(self.ix_references)
+
+    @property
+    def s(self):
+        return self.y.shape[1]
+
+    @property
+    def m(self):
+        return self.u.shape[0]
+
+    def j(self, i):
+        """Number of columns in block hankel matrices
+
+        Returns the number of columns in the block hankel
+        matrices given that all the data is used in the
+        identification problem
+
+        Arguments
+        ---------
+        i : int
+            Number of block rows
+
+        Returns
+        -------
+        int
+            Number of columns in the block hankel
+            matrices.
+        """
+        return self.s-2*i+1
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _Y(self, i):
+        """Output block hankel matrix
+
+        Arguments
+        ---------
+        i : int
+            Number of block rows
+
+        Returns
+        -------
+        2darray
+            Output block hankel matrix
+        """
+        j, l, r = self.j(i), self.l, self.r
+        H = np.zeros(((r+l)*i, j))
+        for m in range(2*i):
+            if m < i:
+                H[m*r:(m+1)*r, :] = self.yref[:, m:m+j]
+            else:
+                H[r*i+(m-i)*l:r*i+(m+1-i)*l, :] = self.y[:, m:m+j]
+        return 1./np.sqrt(j)*H
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _R(self, lag):
+        """Correlation matrix of data array
+
+        Correlation matrix between data array with `lag` last samples
+        removed and data array with first `lag` samples removed.
+
+        Arguments
+        ---------
+        lag : int
+            Time lag / shift
+
+        Returns
+        -------
+        ndarray
+            Correlation matrix
+        """
+        s = self.s
+        i = np.abs(lag)
+        return self.y[:, :s-i].dot(self.yref[:, i:].T) / (s-i)
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _T(self, i):
+        """Block toeplitz matrix from output correlations
+
+        Arguments
+        ---------
+        i : int
+            Number of block rows
+
+        Returns
+        -------
+        ndarray
+            Block toeplitz matrix from output correlations
+        """
+        Y = self._Y(i)
+        Yp = Y[:self.r*i]
+        Yf = Y[self.r*i:]
+        return Yf @ Yp.T
+
+
+class DataDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
+    """Stochastic subspace identificator
+
+    Given measurements of output `y` identify the
+    system matrices A, C, and the covariance matrices Q, R, S
+    of the process noise `w` and measurement noise `v` for the system
+
+    .. math::
+
+        x_{k+1} = Ax_k + w_k
+        y_k = Cx_k + v_k
+    """
+    def __init__(self, y, fs, ix_references=None):
+        """Reference-based data-driven stochastic subspace identicator.
+
+        Define a reference-based data driven stochastic subspace identificator
+        (SSI-data/ref). See [Overschee1996] and [Peeters1999] for more
+        information.
+
+        Arguments
+        ---------
+        y : 2darray
+            Output data matrix (l x s) from `l` outputs with `s` samples.
+        fs : float
+            Sampling rate (Hz)
+        ix_references : Optional[list]
+            Indices to the reference outputs in y. If `None`, all outputs
+            are considered to be references.
+
+        References
+        ----------
+        [Overschee1996] Van Overschee, P., De Moor, B., 1996.
+            Subspace Identification for Linear Systems.
+            Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
+
+        [Peeters1999] Peeters, B., De Roeck, G., 1999.
+            Reference based stochastic subspace identification
+            for output only modal analysis.
+            Mechanical Systems and Signal Processing 13, 855–878.
+            doi: 10.1006/mssp.1999.1249
+        """
+        self.y = y
+        self.fs = fs
+        self.ix_references = ix_references or [*range(self.l)]
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _LQ_decomposition_block_hankel(self, i):
+        """LQ decomposition of data block-hankel matrix
+
+        The projections can be performed more numerically efficient, accurate
+        and stable by utilizing the LQ decomposition of the input-output
+        matrix to determine the projections and other operations.
+
+        Arguments
+        ---------
+        i : int
+            Number of block rows
+
+        Returns
+        -------
+        2darray
+            Lower triangular matrix from LQ decomposition of
+            data block hankel matrix.
+        """
+        R = scipy.linalg.qr(self._Y(i).T, mode='r')[0]
+        K = min(R.shape)
+        L = R[:K, :].T
+        return L
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _svd_projection_matrix(self, i):
+        """Perform SVD of the projection matrix
+
+        Arguments
+        ---------
+        block_rows : int
+            Number of block rows
+
+        Returns
+        -------
+        U : 2darray
+            U is a unitary matrix with the left singular vectors.
+        s : 1darray
+            Singular values of projection matrix.
+        """
+        L = self._LQ_decomposition_block_hankel(i)
+        Lpi = L[self.r*i:, :self.r*i]
+        U, s, _ = np.linalg.svd(Lpi)
+        return U, s
+
+    def perform(self, order, block_rows):
+        """Perform system identification
+
+        Arguments
+        ---------
+        order : int
+            Order of the identified model, note `order / block_rows <= r`
+            where `r` is the number of reference outputs.
+        block_rows : int
+            Number of block rows, note `order / block_rows <= r`
+            where `r` is the number of reference outputs.
+
+        Returns
+        -------
+        A, C, G, R0 : 2darrays
+            System, output, next state-output covariance
+            and zero lag correlation matrix.
+
+        Raises
+        ------
+        ValueError
+            The ratio between the order and number of block rows must
+            be less or equal than the number of references to ensure a
+            consistent equation system, i.e. the system has valid
+            dimensions.
+        """
+        i, l, n, r = block_rows, self.l, order, self.r
+        if n/i > r:
+            raise ValueError(
+                "Following condition violated: order / block_rows <= r")
+        L = self._LQ_decomposition_block_hankel(i)
+        U, s = self._svd_projection_matrix(i)
+        Oim1 = U[:-l, :n] @ np.diag(np.sqrt(s[:n]))
+        ORxi = np.diag(1/np.sqrt(s[:n])) @ U[:, :n].T @ L[r*i:, :r*i]
+        ix_41 = [*range((r+l)*i-l*(i-1), (r+l)*i)]
+        ix_21_and_31 = [*range(r*i, r*i+l)]
+        Tl = np.zeros((n+l, r*i))
+        Tl[n:] = L[ix_21_and_31, :r*i]
+        Tl[:n] = np.linalg.lstsq(Oim1, L[ix_41, :r*i], rcond=None)[0]
+        a = ORxi @ ORxi.T
+        b = (Tl @ ORxi.T)
+        AC = np.linalg.solve(a, b.T).T
+        A = AC[:n]
+        C = AC[n:]
+
+        # Compute next state and zero lag covariance
+        residuals = b - AC @ a
+        QRS = 1./self.j(i) * residuals @ residuals.T
+        Q, R, S = QRS[:n, :n], QRS[n:, n:], QRS[:n, n:]
+        Sig = scipy.linalg.solve_discrete_lyapunov(A, Q)
+        R0 = C @ Sig @ C.T + R
+        G = A @ Sig @ C.T + S
+
+        return A, C, G, R0
+
+
+class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
+    """Stochastic subspace identificator
+
+    Given measurments of output `y` identify the
+    system matrices A, C, and the covariance matrices Q, R, S
+    of the process noise `w` and measurement noise `v` for the system
+
+    .. math::
+
+        x_{k+1} = Ax_k + w_k
+        y_k = Cx_k + v_k
+
+
+    Implementation is based on [Overschee1996] and [Peeters1999].
+
+    References
+    ----------
+    [Overschee1996] Van Overschee, P., De Moor, B., 1996.
+        Subspace Identification for Linear Systems.
+        Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
+
+    [Peeters1999] Peeters, B., De Roeck, G., 1999.
+        Reference based stochastic subspace identification
+        for output only modal analysis.
+        Mechanical Systems and Signal Processing 13, 855–878.
+        doi: 10.1006/mssp.1999.1249
+
+    """
+    def __init__(self, y, fs, ix_references=None):
+        """Reference-based covariance-driven stochastic subspace identicator.
+
+        Define a reference-based covariance driven stochastic subspace
+        identificator (SSI-cov/ref). See [Overschee1996] and
+        [Peeters1999] for more information.
+
+        Arguments
+        ---------
+        y : 2darray
+            Output data matrix (l x s) from `l` outputs with `s` samples.
+        fs : float
+            Sampling rate (Hz)
+        ix_references : Optional[list]
+            Indices to the reference outputs in y. If `None`, all outputs
+            are considered to be references.
+
+        References
+        ----------
+        [Overschee1996] Van Overschee, P., De Moor, B., 1996.
+            Subspace Identification for Linear Systems.
+            Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
+
+        [Peeters1999] Peeters, B., De Roeck, G., 1999.
+            Reference based stochastic subspace identification
+            for output only modal analysis.
+            Mechanical Systems and Signal Processing 13, 855–878.
+            doi: 10.1006/mssp.1999.1249
+
+        """
+        self.y = y
+        self.fs = fs
+        self.ix_references = ix_references or [*range(self.l)]
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _svd_block_toeplitz(self, i):
+        """Perform and return SVD of the block toeplitz matrix
+
+        This method is cached, repeated calls with the same argument
+        does not recompute the block toeplitz matrix.
+
+        Arguments
+        ---------
+        block_rows : int
+            Number of block rows
+
+        Returns
+        -------
+        U, S, V : 2darray
+            U and V are the unitary matrices and S is the
+            singular values.
+        """
+        U, s, VH = np.linalg.svd(self._T(i))
+        return U, s, VH
+
+    def perform(self, order, block_rows):
+        """Perform system identification
+
+        Arguments
+        ---------
+        order : int
+            Order of the identified model
+        block_rows : int
+            Number of block rows
+
+        Returns
+        -------
+        A, C, G, R0 : 2darrays
+            System, output, next state-output covariance
+            and zero lag correlation matrix.
+
+        Raises
+        ------
+        ValueError
+            The ratio between the order and number of block rows must
+            be less or equal than the number of references to ensure a
+            consistent equation system, i.e. the system has valid
+            dimensions.
+        """
+        i, l, n, r = block_rows, self.l, order, self.r
+        if n/i > r:
+            raise ValueError(
+                "Following condition violated: order / block_rows <= r")
+        U, s, VH = self._svd_block_toeplitz(i)
+        U1 = U[:, :n]
+        V1H = VH[:n]
+        sqrt_S1 = np.diag(np.sqrt(s[:n]))
+        inv_sqrt_S1 = np.diag(1/np.sqrt(s[:n]))
+
+        Oi = U1 @ sqrt_S1
+        C = Oi[:l]
+
+        Cref = sqrt_S1 @ V1H
+        G = Cref[:, -r:]
+
+        T1 = self._T(i)
+        T2 = np.zeros_like(T1)
+        T2[:-l, :] = T1[l:, :]
+        T2[-l:, r:] = T1[-l:, :-r]
+        T2[-l:, :r] = self._R(2*i)
+        A = inv_sqrt_S1 @ U1.T @ T2 @ V1H.T @ inv_sqrt_S1
+
+        R0 = self._R(0)
+        return A, C, G, R0
+
+
+class BaseCombinedSID(abc.ABC):
+    @abc.abstractmethod
+    def __init__(self, u, y, fs):
         """Subspace identificator
 
         Arguments
@@ -63,13 +496,49 @@ class BaseSID(abc.ABC):
             Input data matrix (m x s) from `m` input with `s` samples.
         y : 2darray
             Output data matrix (l x s) from `l` outputs with `s` samples.
+        fs : float
+            Sampling rate
         """
         self.y = y
         self.u = u
+        self.fs = fs
 
     @abc.abstractmethod
     def perform(self, *args, **kwargs):
         pass
+
+    def psd(self, return_trace=False, **kw):
+        """Compute power spectral density matrix of outputs
+
+        Compute the power spectral density matrix of the outputs
+        with Welch's method.
+
+        Arguments
+        ---------
+        return_trace : Optional[bool]
+            Return the entire psd matrix or only the trace of the psd matrix.
+        kw : dict
+            See keywords to scipy.signal.csd and scipy.signal.welch.
+
+        Returns
+        -------
+        f : 1darray
+            Frequency vector of the psd matrix
+        Pyy : 3darray or 1darray
+            Output PSD matrix where the first dimension refers to the
+            frequency of the psd estimator, see get_frequency_vector,
+            and the second and third dimensions refers to the degree
+            of freedom of the input and output as given in y. If
+            return_trace, the trace of the psd matrix is returned
+            instead of the entire psd matrix.
+        """
+        psd = find_psd_matrix(self.y, fs=self.fs, **kw)
+        f = get_frequency_vector(self.fs, psd.shape[0])
+        if return_trace:
+            out = np.trace(psd, axis1=1, axis2=2)
+        else:
+            out = psd
+        return f, out
 
     @property
     def l(self):
@@ -135,156 +604,6 @@ class BaseSID(abc.ABC):
         """
         return create_block_hankel_matrix(self.u, i)
 
-    def _Yp(self, i):
-        """Output block hankel matrix of past
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Output block hankel matrix of past
-        """
-        return self._Y(i)[:i*self.l]
-
-    def _Yf(self, i):
-        """Output block hankel matrix of future
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Output block hankel matrix of future
-        """
-        return self._Y(i)[i*self.l:]
-
-    def _Up(self, i):
-        """Input block hankel matrix of past
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Input block hankel matrix of past
-        """
-        return self._U(i)[:i*self.m]
-
-    def _Uf(self, i):
-        """Input block hankel matrix of future
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Input block hankel matrix of future
-        """
-        return self._U(i)[i*self.m:]
-
-    def _Ypp(self, i):
-        """Output block hankel matrix of past (plus)
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Output block hankel matrix of past (plus)
-        """
-        return self._Y(i)[:(i+1)*self.l]
-
-    def _Yfm(self, i):
-        """Output block hankel matrix of future (minus)
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Output block hankel matrix of future (minus)
-        """
-        return self._Y(i)[(i+1)*self.l:]
-
-    def _Upp(self, i):
-        """Input block hankel matrix of past (plus)
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Input block hankel matrix of past (plus)
-        """
-        return self._U(i)[:(i+1)*self.m]
-
-    def _Ufm(self, i):
-        """Input block hankel matrix of future (minus)
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Input block hankel matrix of future (minus)
-        """
-        return self._U(i)[(i+1)*self.m:]
-
-    def _Wp(self, i):
-        """Input-output block hankel matrix of past
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Input-output block hankel matrix of past
-        """
-        return np.vstack((self._Up(i), self._Yp(i)))
-
-    def _Wpp(self, i):
-        """Input-output block hankel matrix of past (plus)
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Input-output block hankel matrix of past (plus)
-        """
-        return np.vstack((self._Upp(i), self._Ypp(i)))
-
     def _W(self, i):
         """Input-output block hankel matrix
 
@@ -301,7 +620,7 @@ class BaseSID(abc.ABC):
         return np.vstack((self._U(i), self._Y(i)))
 
 
-class CombinedDeterministicStochasticSID(BaseSID):
+class CombinedDeterministicStochasticSID(BaseCombinedSID):
     """Combined deterministic stochastic subspace identificator
 
     Given measurments of output `y` and input `u` identify the
@@ -324,7 +643,7 @@ class CombinedDeterministicStochasticSID(BaseSID):
         Subspace Identification for Linear Systems.
         Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
     """
-    def __init__(self, u, y):
+    def __init__(self, u, y, fs):
         """Combined deterministic-stochastic subspace identificator
 
         Arguments
@@ -333,9 +652,12 @@ class CombinedDeterministicStochasticSID(BaseSID):
             Input data matrix (m x s) from `m` input with `s` samples.
         y : 2darray
             Output data matrix (l x s) from `l` outputs with `s` samples.
+        fs : float
+            Sampling rate (Hz)
         """
         self.y = y
         self.u = u
+        self.fs = fs
 
     @functools.lru_cache(maxsize=20, typed=False)
     def _R_from_RQ_decomposition(self, i):
@@ -375,7 +697,7 @@ class CombinedDeterministicStochasticSID(BaseSID):
         return L
 
     def _ix_block_rows_R(self, i):
-        j, l, m = self.j(i), self.l, self.m
+        l, m = self.l, self.m
         return np.cumsum([0, m*i, m, m*(i-1), l*i, l, l*(i-1)])
 
     def _weighted_oblique_projection(self, i):
@@ -391,7 +713,7 @@ class CombinedDeterministicStochasticSID(BaseSID):
         2darray
             Weighted oblique projection of input-output
         """
-        j, l, m, s = self.j(i), self.l, self.m, self.s
+        l, m = self.l, self.m
         R = self._R_from_RQ_decomposition(i)
         ix = self._ix_block_rows_R(i)
         L = R[ix[4]:ix[6], ix[0]:ix[4]].dot(
@@ -420,8 +742,8 @@ class CombinedDeterministicStochasticSID(BaseSID):
         U, s, VH : 2darray, 1darray, 2darray
             SVD of weighted oblique projection of input-output
         """
-        O = self._weighted_oblique_projection(i)
-        U, s, VH = np.linalg.svd(O, full_matrices=False)
+        Oi = self._weighted_oblique_projection(i)
+        U, s, VH = np.linalg.svd(Oi, full_matrices=False)
         return U, s, VH
 
     def perform(self, order, block_rows, estimate_B_and_D=False, estimate_covariances=False):
@@ -461,7 +783,7 @@ class CombinedDeterministicStochasticSID(BaseSID):
             process and measurement noise. If `estimate_B_and_D=True` and
             `estimate_covariances=True`.
         """
-        n, i, j, l, m, s = order, block_rows, self.j(block_rows), self.l, self.m, self.s
+        n, i, l, m, s = order, block_rows, self.l, self.m, self.s
         R = self._R_from_RQ_decomposition(i)
         ix = self._ix_block_rows_R(i)
         U, s, VH = self._svd_weighted_oblique_projection(i)
@@ -477,7 +799,7 @@ class CombinedDeterministicStochasticSID(BaseSID):
 
         # Find A and C
         A = S[:n, :n]
-        C = S[n:,:n]
+        C = S[n:, :n]
 
         # Find B and D
         if estimate_B_and_D:
@@ -490,12 +812,12 @@ class CombinedDeterministicStochasticSID(BaseSID):
             L2 = lambda k: L[n:, (k-1)*l:k*l]  # in R^{l\times l}
 
             Mmat = scipy.linalg.pinv(Gim1)
-            M = lambda k: Mmat[:, (k-1)*l:k*l] # in R^{n\times l}
+            M = lambda k: Mmat[:, (k-1)*l:k*l]
 
             N11 = np.hstack(
-                [-L1(1)] + [M(k-1)-L1(k) for k in range(2, i+1)]) # in R^{n \times li}
+                [-L1(1)] + [M(k-1)-L1(k) for k in range(2, i+1)])
             N21 = np.hstack(
-                [np.eye(l)-L2(1)] + [-L2(k) for k in range(2, i+1)]) # in R^{l \times li}
+                [np.eye(l)-L2(1)] + [-L2(k) for k in range(2, i+1)])
 
             QN = np.zeros((P.size, m*(l+n)), dtype=np.float)
             Nl = np.zeros((n+l, l*i))

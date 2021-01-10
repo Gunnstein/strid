@@ -206,7 +206,7 @@ def find_psd_matrix(y, **kwargs):
 
     Returns
     -------
-    ndarray
+    3darray
        PSD (n x m x m) matrix where the first dimension refers to the
        frequency of the psd estimator, see get_frequency_vector, and
        the second and third dimensions refers to the degree of freedom
