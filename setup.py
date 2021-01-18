@@ -10,7 +10,7 @@ with open('strid/__init__.py') as f:
             version = version.strip("'")
             break
 
-with open('README.rst', 'r') as fin:
+with open('README.rst', 'r', encoding="utf-8") as fin:
     long_description = fin.read()
 
 
@@ -19,7 +19,7 @@ setup(
     version=version,
     author='Gunnstein T. Frøseth',
     author_email='gunnstein@mailbox.org',
-    description='System identification of structural engineering systems',
+    description='System identification of linear time-invariant systems',
     license='ISC',
     long_description=long_description,
     long_description_content_type="text/x-rst",
@@ -28,7 +28,7 @@ setup(
     classifiers=[
         "License :: OSI Approved :: ISC License (ISCL)",
         "Operating System :: OS Independent",
-        "Programming Language :: Python",
+        "Programming Language :: Python :: 3",
         "Topic :: Scientific/Engineering",
         ],
     install_requires=["numpy", "scipy", "matplotlib"])

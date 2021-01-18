@@ -2,9 +2,9 @@
 strid
 =====
 
-Python package for system identification of structural dynamic systems.
+Python package for system identification of mechanical systems.
 
-The identification methods are applicable to general linear systems,
+Most of the identification methods are applicable to linear time-invariant systems,
 and the implementation may also be used in other domains.
 
 
@@ -19,11 +19,19 @@ Either download the repository to your computer and install, e.g. by **pip**
    pip install .
 
 
-or install directly from github.
+or install directly from github
 
 ::
 
    pip install git+https://github.com/gunnstein/strid.git
+
+
+or install directly from the python package index
+
+::
+   
+   pip install strid
+
 
 Usage
 -----
