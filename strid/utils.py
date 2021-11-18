@@ -6,7 +6,8 @@ import scipy.signal
 __all__ = ["find_rayleigh_damping_coeffs",
            "get_frequency_vector", "modal_assurance_criterion",
            "find_psd_matrix", "w2f", "f2w", "norm2", "modal_scale_factor",
-           "mean_phase", "mean_phase_deviation", "Mode",
+           "modal_phase_collinearity", "mean_phase", "mean_phase_deviation",
+           "Mode",
            ]
 
 
@@ -75,8 +76,8 @@ def modal_scale_factor(u, v):
 def modal_phase_collinearity(u):
     """Modal phase collinearity of mode vector u
 
-    Mode phase collinearity (MPC) quantifies spatial consistency of
-    identification results. For classical normal modes, all dofs in a
+    Mode phase collinearity (MPC) quantifies the complexity of a
+    mode vector. For classical normal modes, all dofs in a
     structure vibrate in phase with one another such that a maximum
     modal value is reached at the same instant for all dofs. MPC
     ranges from 0 to 1, where MPC=1 indicates that all dofs are in
@@ -100,7 +101,7 @@ def modal_phase_collinearity(u):
     """
     S = np.cov(u.real, u.imag)
     l = np.linalg.eigvals(S)
-    return (2*l[0]/(l[0]+l[1]) - 1)**2
+    return (l[0]-l[1])**2/(l[0]+l[1])**2
 
 
 def mean_phase(u):
@@ -193,11 +194,11 @@ def modal_assurance_criterion(u, v):
 
 
 def find_psd_matrix(y, **kwargs):
-    """Calculate the PSD matrix from the measured data A
+    """Calculate PSD matrix from timeseries
 
     Arguments
     ---------
-    y : ndarray
+    y : 2darray
        Measurement matrix where each row corresponds to the entire time
        series of a measurement channel.
     kwargs :
@@ -284,7 +285,7 @@ class ShearFrame(object):
 
     def _get_K(self):
         k, n = self.k, self.n
-        K = np.zeros((n, n), np.float)
+        K = np.zeros((n, n), float)
         for i in range(n):
             K[i, i] = 2 * k
             if i > 0:
