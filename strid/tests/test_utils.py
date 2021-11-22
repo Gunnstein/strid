@@ -2,10 +2,10 @@
 import numpy as np
 import unittest
 
-from .utils import ShearFrame
-from . import *
+from ..utils import ShearFrame
+from .. import *
 
-np.random.seed(2)
+
 
 
 class TestShearFrame(unittest.TestCase):
@@ -90,7 +90,7 @@ class TestUtils(unittest.TestCase):
 
     def test_mean_phase_deviation(self):
         n = 10
-        phases = (np.random.randint(2, size=n)*2 - 1)*np.pi/8
+        phases = np.array([1.]*5 + [-1.]*5)*np.pi/8
         u = np.ones(n) * np.exp(1.j*phases)
         self.assertAlmostEqual(mean_phase_deviation(u), np.pi/8)
 

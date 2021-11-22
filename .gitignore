@@ -6,5 +6,7 @@
 !example.png
 !strid/
 !strid/*.py
+!strid/tests/
+!strid/tests/*.py
 !examples/
 !examples/*.ipynb

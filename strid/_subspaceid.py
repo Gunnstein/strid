@@ -16,7 +16,7 @@ __all__ = ["CombinedDeterministicStochasticSID",
            "AbstractReferenceBasedStochasticSID"]
 
 
-def create_block_hankel_matrix(data, block_rows, ncols=None):
+def create_block_hankel_matrix(data, block_rows, ncols=None, ix_ref=None):
     """Block hankel matrix from data array
 
     Arguments
@@ -30,6 +30,9 @@ def create_block_hankel_matrix(data, block_rows, ncols=None):
     ncols : Optional[int]
         Number of columns in block hankel matrix. If None,
         all data in the data matrix is used.
+    ix_ref : Optional[list]
+        Indices to the reference outputs in y. If `None`, all outputs
+        are considered to be references.
 
     Returns
     -------
@@ -37,12 +40,19 @@ def create_block_hankel_matrix(data, block_rows, ncols=None):
         Block hankel matrix from data array
     """
     l, s = data.shape
+    ix_ref = ix_ref or [*range(l)]
+    r = len(ix_ref)
     i = block_rows
     j = ncols or s - 2*i + 1
-    H = np.zeros((l*2*i, j))
+    y = data
+    yref = y[ix_ref]
+    H = np.zeros(((r+l)*i, j))
     for m in range(2*i):
-        H[m*l:(m+1)*l, :] = data[:, m:m+j]
-    return 1/np.sqrt(j)*H
+        if m < i:
+            H[m*r:(m+1)*r, :] = yref[:, m:m+j]
+        else:
+            H[r*i+(m-i)*l:r*i+(m+1-i)*l, :] = y[:, m:m+j]
+    return 1./np.sqrt(j)*H
 
 
 class AbstractReferenceBasedStochasticSID(abc.ABC):
@@ -151,200 +161,8 @@ class AbstractReferenceBasedStochasticSID(abc.ABC):
         2darray
             Output block hankel matrix
         """
-        j, l, r = self.j(i), self.l, self.r
-        H = np.zeros(((r+l)*i, j))
-        for m in range(2*i):
-            if m < i:
-                H[m*r:(m+1)*r, :] = self.yref[:, m:m+j]
-            else:
-                H[r*i+(m-i)*l:r*i+(m+1-i)*l, :] = self.y[:, m:m+j]
-        return 1./np.sqrt(j)*H
-
-    @functools.lru_cache(maxsize=20, typed=False)
-    def _R(self, lag):
-        """Correlation matrix of data array
-
-        Correlation matrix between data array with `lag` last samples
-        removed and data array with first `lag` samples removed.
-
-        Arguments
-        ---------
-        lag : int
-            Time lag / shift
-
-        Returns
-        -------
-        ndarray
-            Correlation matrix
-        """
-        s = self.s
-        i = np.abs(lag)
-        return self.y[:, :s-i].dot(self.yref[:, i:].T) / (s-i)
-
-    @functools.lru_cache(maxsize=20, typed=False)
-    def _T(self, i):
-        """Block toeplitz matrix from output correlations
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        ndarray
-            Block toeplitz matrix from output correlations
-        """
-        Y = self._Y(i)
-        Yp = Y[:self.r*i]
-        Yf = Y[self.r*i:]
-        return Yf @ Yp.T
-
-
-class DataDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
-    """Stochastic subspace identificator
-
-    Given measurements of output `y` identify the
-    system matrices A, C, and the covariance matrices Q, R, S
-    of the process noise `w` and measurement noise `v` for the system
-
-    .. math::
-
-        x_{k+1} = Ax_k + w_k
-        y_k = Cx_k + v_k
-    """
-    def __init__(self, y, fs, ix_references=None):
-        """Reference-based data-driven stochastic subspace identicator.
-
-        Define a reference-based data driven stochastic subspace identificator
-        (SSI-data/ref). See [Overschee1996] and [Peeters1999] for more
-        information.
-
-        Arguments
-        ---------
-        y : 2darray
-            Output data matrix (l x s) from `l` outputs with `s` samples.
-        fs : float
-            Sampling rate (Hz)
-        ix_references : Optional[list]
-            Indices to the reference outputs in y. If `None`, all outputs
-            are considered to be references.
-
-        References
-        ----------
-        [Overschee1996] Van Overschee, P., De Moor, B., 1996.
-            Subspace Identification for Linear Systems.
-            Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
-
-        [Peeters1999] Peeters, B., De Roeck, G., 1999.
-            Reference based stochastic subspace identification
-            for output only modal analysis.
-            Mechanical Systems and Signal Processing 13, 855–878.
-            doi: 10.1006/mssp.1999.1249
-        """
-        self.y = y
-        self.fs = fs
-        self.ix_references = ix_references or [*range(self.l)]
-
-    @functools.lru_cache(maxsize=20, typed=False)
-    def _LQ_decomposition_block_hankel(self, i):
-        """LQ decomposition of data block-hankel matrix
-
-        The projections can be performed more numerically efficient, accurate
-        and stable by utilizing the LQ decomposition of the data
-        matrix to determine the projections and other operations.
-
-        Arguments
-        ---------
-        i : int
-            Number of block rows
-
-        Returns
-        -------
-        2darray
-            Lower triangular matrix from LQ decomposition of
-            data block hankel matrix.
-        """
-        R = scipy.linalg.qr(self._Y(i).T, mode='r')[0]
-        K = min(R.shape)
-        L = R[:K, :].T
-        return L
-
-    @functools.lru_cache(maxsize=20, typed=False)
-    def _svd_weighted_projection(self, i):
-        """Perform SVD of the projection matrix
-
-        Arguments
-        ---------
-        block_rows : int
-            Number of block rows
-
-        Returns
-        -------
-        U : 2darray
-            U is a unitary matrix with the left singular vectors.
-        s : 1darray
-            Singular values of projection matrix.
-        """
-        L = self._LQ_decomposition_block_hankel(i)
-        Lpi = L[self.r*i:, :self.r*i]
-        U, s, _ = np.linalg.svd(Lpi)
-        return U, s
-
-    def perform(self, order, block_rows):
-        """Perform system identification
-
-        Arguments
-        ---------
-        order : int
-            Order of the identified model, note `order / block_rows <= r`
-            where `r` is the number of reference outputs.
-        block_rows : int
-            Number of block rows, note `order / block_rows <= r`
-            where `r` is the number of reference outputs.
-
-        Returns
-        -------
-        A, C, G, R0 : 2darrays
-            System, output, next state-output covariance
-            and zero lag correlation matrix.
-
-        Raises
-        ------
-        ValueError
-            The ratio between the order and number of block rows must
-            be less or equal than the number of references to ensure a
-            consistent equation system, i.e. the system has valid
-            dimensions.
-        """
-        i, l, n, r = block_rows, self.l, order, self.r
-        if n/i > r:
-            raise ValueError(
-                "Following condition violated: order / block_rows <= r")
-        L = self._LQ_decomposition_block_hankel(i)
-        U, s = self._svd_weighted_projection(i)
-        Oim1 = U[:-l, :n] @ np.diag(np.sqrt(s[:n]))
-        ORxi = np.diag(1/np.sqrt(s[:n])) @ U[:, :n].T @ L[r*i:, :r*i]
-        ix_41 = [*range((r+l)*i-l*(i-1), (r+l)*i)]
-        ix_21_and_31 = [*range(r*i, r*i+l)]
-        Tl = np.zeros((n+l, r*i))
-        Tl[n:] = L[ix_21_and_31, :r*i]
-        Tl[:n] = np.linalg.lstsq(Oim1, L[ix_41, :r*i], rcond=None)[0]
-        a = ORxi @ ORxi.T
-        b = (Tl @ ORxi.T)
-        AC = np.linalg.solve(a, b.T).T
-        A = AC[:n]
-        C = AC[n:]
-
-        # Compute next state and zero lag covariance
-        residuals = b - AC @ a
-        QRS = 1./self.j(i) * residuals @ residuals.T
-        Q, R, S = QRS[:n, :n], QRS[n:, n:], QRS[:n, n:]
-        Sig = scipy.linalg.solve_discrete_lyapunov(A, Q)
-        R0 = C @ Sig @ C.T + R
-        G = A @ Sig @ C.T + S
-
-        return A, C, G, R0
+        return create_block_hankel_matrix(
+            self.y, i, ix_ref=self.ix_references)
 
 
 class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
@@ -408,6 +226,47 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
         self.y = y
         self.fs = fs
         self.ix_references = ix_references or [*range(self.l)]
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _R(self, lag):
+        """Correlation matrix of data array
+
+        Correlation matrix between data array with `lag` last samples
+        removed and data array with first `lag` samples removed.
+
+        Arguments
+        ---------
+        lag : int
+            Time lag / shift
+
+        Returns
+        -------
+        ndarray
+            Correlation matrix
+        """
+        s = self.s
+        i = np.abs(lag)
+        return self.y[:, :s-i].dot(self.yref[:, i:].T) / (s-i)
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _T(self, i):
+        """Block toeplitz matrix from output correlations
+
+        Arguments
+        ---------
+        i : int
+            Number of block rows
+
+        Returns
+        -------
+        ndarray
+            Block toeplitz matrix from output correlations
+        """
+        Y = self._Y(i)
+        Yp = Y[:self.r*i]
+        Yf = Y[self.r*i:]
+        return Yf @ Yp.T
+
 
     @functools.lru_cache(maxsize=20, typed=False)
     def _svd_block_toeplitz(self, i):
@@ -477,9 +336,168 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
         T2[-l:, :r] = self._R(2*i)
         A = inv_sqrt_S1 @ U1.T @ T2 @ V1H.T @ inv_sqrt_S1
 
-        R0 = self._R(0)
+        R0 = self.y @ self.y.T / self.s
         return A, C, G, R0
 
+
+class DataDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
+    """Stochastic subspace identificator
+
+    Given measurements of output `y` identify the
+    system matrices A, C, and the covariance matrices Q, R, S
+    of the process noise `w` and measurement noise `v` for the system
+
+    .. math::
+
+        x_{k+1} = Ax_k + w_k
+        y_k = Cx_k + v_k
+    """
+    def __init__(self, y, fs, ix_references=None):
+        """Reference-based data-driven stochastic subspace identicator.
+
+        Define a reference-based data driven stochastic subspace identificator
+        (SSI-data/ref). See [Overschee1996] and [Peeters1999] for more
+        information.
+
+        Arguments
+        ---------
+        y : 2darray
+            Output data matrix (l x s) from `l` outputs with `s` samples.
+        fs : float
+            Sampling rate (Hz)
+        ix_references : Optional[list]
+            Indices to the reference outputs in y. If `None`, all outputs
+            are considered to be references.
+
+        References
+        ----------
+        [Overschee1996] Van Overschee, P., De Moor, B., 1996.
+            Subspace Identification for Linear Systems.
+            Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
+
+        [Peeters1999] Peeters, B., De Roeck, G., 1999.
+            Reference based stochastic subspace identification
+            for output only modal analysis.
+            Mechanical Systems and Signal Processing 13, 855–878.
+            doi: 10.1006/mssp.1999.1249
+        """
+        self.y = y
+        self.fs = fs
+        self.ix_references = ix_references or [*range(self.l)]
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _LQ_decomposition_block_hankel(self, i):
+        """LQ decomposition of data block-hankel matrix
+
+        The projections can be performed more numerically efficient, accurate
+        and stable by utilizing the LQ decomposition of the data
+        matrix to determine the projections and other operations.
+
+        Arguments
+        ---------
+        i : int
+            Number of block rows
+
+        Returns
+        -------
+        2darray
+            Lower triangular matrix from LQ decomposition of
+            data block hankel matrix.
+        """
+        QT, LT = scipy.linalg.qr(self._Y(i).T, mode='economic')
+        Q = QT.T
+        L = LT.T
+        return L, Q
+
+    @functools.lru_cache(maxsize=20, typed=False)
+    def _svd_weighted_projection(self, i):
+        """Perform SVD of the projection matrix
+
+        Arguments
+        ---------
+        block_rows : int
+            Number of block rows
+
+        Returns
+        -------
+        U : 2darray
+            U is a unitary matrix with the left singular vectors.
+        s : 1darray
+            Singular values of projection matrix.
+        """
+        L, Q = self._LQ_decomposition_block_hankel(i)
+        Lpi = L[self.r*i:, :self.r*i]
+        U, s, _ = np.linalg.svd(Lpi)
+        return U, s
+
+
+    def perform(self, order, block_rows):
+        """Perform system identification
+
+        Arguments
+        ---------
+        order : int
+            Order of the identified model, note `order / block_rows <= r`
+            where `r` is the number of reference outputs.
+        block_rows : int
+            Number of block rows, note `order / block_rows <= r`
+            where `r` is the number of reference outputs.
+
+        Returns
+        -------
+        A, C, G, R0 : 2darrays
+            System, output, next state-output covariance
+            and zero lag correlation matrix.
+
+        Raises
+        ------
+        ValueError
+            The ratio between the order and number of block rows must
+            be less or equal than the number of references to ensure a
+            consistent equation system, i.e. the system has valid
+            dimensions.
+        """
+        i, j, l, n, r = block_rows, self.j(block_rows), self.l, order, self.r
+        if n/i > r:
+            raise ValueError(
+                "Following condition violated: order / block_rows <= r")
+        L, Q = self._LQ_decomposition_block_hankel(i)
+        U, s = self._svd_weighted_projection(i)
+        Epinv = np.diag(1/np.sqrt(s[:n])) @ U[:, :n].T
+        X = Epinv @ L[r*i:, :r*i] # Actually X*Q1
+
+        Oim1 = U[:-l, :n] @ np.diag(np.sqrt(s[:n]))
+        ix_row_4 = [*range((r+l)*i-l*(i-1), (r+l)*i)]
+        ix_row_2_and_3 = [*range(r*i, r*i+l)]
+        XY = np.zeros((n+l, r*i+l))
+        XY[n:] = L[ix_row_2_and_3, :r*i+l]
+        XY[:n, :r*(i+1)] = np.linalg.lstsq(
+            Oim1, L[ix_row_4, :r*(i+1)], rcond=None)[0]
+
+        AC = np.linalg.lstsq(X.T, XY[:, :r*i].T, rcond=None)[0].T
+        A = AC[:n]
+        C = AC[n:]
+
+        # Compute next state and zero lag covariance
+        algorithm = 1
+        if algorithm == 1:
+            R0 =(1/j*L[r*i:r*i+l, :r*i+l] @ L[r*i:r*i+l, :r*i+l].T)
+            G = (1/j*Epinv @ L[r*i:, :r*i] @ L[:r*i, :r*i].T)[:, -r:]
+        elif algorithm == 3:
+            # This is the algorithm presented in
+            # [Peeters1999] and algorithm 3 in [Overschee1996],
+            # however, the residuals are zero in the implementation
+            # and therefore R0 and G are as well.
+            # Using algorithm 1 from [Overschee1996] until error is
+            # corrected.
+            r = XY@Q[:r*i+l] - AC@X@Q[:r*i]
+            QRS = np.cov(r)
+            Q, R, S = QRS[:n, :n], QRS[n:, n:], QRS[:n, n:]
+            Sig = scipy.linalg.solve_discrete_lyapunov(A, Q)
+            R0 = C @ Sig @ C.T + R
+            G = A @ Sig @ C.T + S
+
+        return A, C, G, R0
 
 class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
     """Combined deterministic stochastic subspace identificator
@@ -496,9 +514,10 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
     def __init__(self, u, y, fs, ix_references=None):
         """Reference-based combined deterministic-stochastic subspace identicator.
 
-        Define a reference-based combined deterministic-stochastic subspace identificator
-        (CSI/ref). See [Overschee1996] and [Reynders2008] for more
-        information.
+        Define a reference-based combined deterministic-stochastic subspace
+        identificator (CSI/ref).
+
+        See [Overschee1996] and [Reynders2008] for more information.
 
         Arguments
         ---------
@@ -518,10 +537,10 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
             Subspace Identification for Linear Systems.
             Springer US, Boston, MA. doi: 10.1007/978-1-4613-0465-4
 
-        [Reynders2008] Reynders, E., Roeck, G.D., 2008. 
-            Reference-based combined deterministic–stochastic subspace 
-            identification for experimental and operational modal analysis. 
-            Mechanical Systems and Signal Processing 22, 617–637. 
+        [Reynders2008] Reynders, E., Roeck, G.D., 2008.
+            Reference-based combined deterministic–stochastic subspace
+            identification for experimental and operational modal analysis.
+            Mechanical Systems and Signal Processing 22, 617–637.
             odi: 10.1016/j.ymssp.2007.09.004
 
         """
@@ -529,11 +548,11 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
         self.y = y
         self.fs = fs
         self.ix_references = ix_references or [*range(self.l)]
-        
+
     @property
     def m(self):
         return self.u.shape[0]
-    
+
     @functools.lru_cache(maxsize=20, typed=False)
     def _U(self, i):
         """Input block hankel matrix
@@ -626,7 +645,7 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
         """
         U, s, _ = np.linalg.svd(self._weighted_projection(i))
         return U, s
-    
+
     def _weighted_projection(self, i):
         """Return weighted oblique projection of input-output
 
@@ -682,16 +701,16 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
         C : 2darray
             Output matrix of state space model.
         D : Optional[2darray]
-            Direct feedthrough matrix of state space model, only returned if 
+            Direct feedthrough matrix of state space model, only returned if
             `estimate_B_and_D` is True.
         Q : Optional[2darray]
-            Covariance matrix of the process noise, only returned if 
+            Covariance matrix of the process noise, only returned if
             `estimate_covariances` is True.
         R : Optional[2darray]
-            Covariance matrix of the measurement noise, only returned if 
+            Covariance matrix of the measurement noise, only returned if
             `estimate_covariances` is True.
         S : Optional[2darray]
-            Covariance matrix between the process and measurement noise, 
+            Covariance matrix between the process and measurement noise,
             only returned if `estimate_covariances` is True.
 
         Raises
@@ -717,19 +736,19 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
         Tr = np.vstack(
             (pinv_Gam_i @ L[-i*l:, :-(i-1)*l],
              L[i*m:2*i*m, :-(i-1)*l]))
-        
+
         S = np.linalg.lstsq(Tr.T, Tl.T, rcond=None)[0].T
-        
+
         # Find A and C
         A = S[:n, :n]
         C = S[n:, :n]
-        
+
         if estimate_B_and_D:
             # Approach using the LQ result
-            # ("robust algorithm", [VanOverschee1996]) 
+            # ("robust algorithm", [VanOverschee1996])
             L_zero = np.hstack((L[-i*l:, :i*(2*m+r)], np.zeros((i*l, l))))
             P = Tl - S[:, :n] @ pinv_Gam_i @ L_zero
-            
+
             L1 = A @ pinv_Gam_i
             L2 = C @ pinv_Gam_i
             M = np.linalg.pinv(Gam_im1)
@@ -742,21 +761,21 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
                 np.hstack((np.eye(l), np.zeros((l, Gam_im1.shape[1])))),
                 np.hstack((np.zeros((Gam_im1.shape[0], l)), Gam_im1))
             ))
-            
+
             UN = np.zeros(((i*(2*m+r)+l)*(n+l), m*(n+l)))
             for k in range(i):
                 Ufk = L[m*(k+i):m*(k+i+1), :-(i-1)*l]
                 Nk[:, :(i-k)*l] = N1[:, k*l:]
                 Nk[:, (i-k)*l:] = 0.
                 UN += np.kron(Ufk.T, Nk @ Nr)
-                
+
             DB = np.linalg.lstsq(UN, P.T.reshape(-1), rcond=None)[0].reshape((m, -1)).T
             D = DB[:l]
             B = DB[l:]
         else:
             B = None
             D = None
-                
+
         # Find covariance matrices
         if estimate_covariances:
             TTT = Tl - Tl @ np.linalg.lstsq(Tr, Tr, rcond=None)[0]

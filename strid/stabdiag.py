@@ -7,7 +7,7 @@ __all__ = ["StabilizationDiagram", ]
 
 
 class ModePicker(object):
-    """Class to pick modes (poles) from stabilization diagrams.
+    """Class to pick modes (poles) from stabilization diagrams in matplotlib.
 
     The class alters the marker size of the picked artist and changes the
     edgecolor of a picked artist in a stabilization diagram. The `on_pick` and
