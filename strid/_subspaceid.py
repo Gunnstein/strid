@@ -1,4 +1,4 @@
-# -*- coding:utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Implementation of stochastic and combined deterministic-stochastic subspace
 identification methods

@@ -10,3 +10,4 @@
 !strid/tests/*.py
 !examples/
 !examples/*.ipynb
+!examples/*.gif
