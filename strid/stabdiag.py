@@ -136,7 +136,7 @@ class StabilizationDiagram:
     marker = '.'
     pickradius = 2.0
     dpi = 144
-    figsize = np.array([1, 1]) / 2.5 * 10
+    figsize = np.array([1, 1]) / 2.5 * 16
     picked_edgecolor = 'k'
     picked_markersize_factor = 2
 
@@ -153,15 +153,25 @@ class StabilizationDiagram:
         the `picked_modes` property
 
         Plot modes with the `plot` method.
+        
+        The PSD can be superimposed on the stabilization diagram by
+        accessing/using the attribute `axes_psd` which is a matplotlib.Axes 
+        instance.
         """
         self.figure = plt.figure(figure_name, figsize=self.figsize,
                                  dpi=self.dpi)
         self.gridspec = self.figure.add_gridspec(nrows=2, ncols=1, wspace=0.15,
                                                  hspace=0.3)
 
-        self.axes_plot = self.figure.add_subplot(self.gridspec[0])
-        self.axes_plot.set(xlabel='Frequency (Hz)', ylabel='Model Order',
+        self.axes_psd = self.figure.add_subplot(self.gridspec[0])
+        self.axes_psd.set(xlabel='Frequency (Hz)', ylabel='PSD',
                            title='Stabilization Diagram')
+        self.axes_psd.yaxis.set_visible(False)
+        
+        self.axes_plot = self.axes_psd.twinx()
+        self.axes_plot.set(ylabel="Model order")
+        self.axes_plot.yaxis.tick_left()
+        self.axes_plot.yaxis.set_label_position("left")
 
         self.axes_table = self.figure.add_subplot(self.gridspec[1])
         self.axes_table.axis('off')
@@ -189,18 +199,23 @@ class StabilizationDiagram:
         modes : dict
             Dictionary where the key is the model order and
             the value is a list of strid.Mode instances.
+            
+        See Also
+        --------
+        filter_modes
+            Method to filter out modes not relevant for further analysis and 
+            thus not plotted in stabilization diagram.
+        find_stable_modes
+            Method to classify stable modes.
         """
-        prev_modes = None
+        filtered_modes = self.filter_modes(modes)
+        stable_modes = self.find_stable_modes(filtered_modes)
         orders = sorted([*modes.keys()])
         for order in orders:
-            order_modes = modes[order]
-            if prev_modes is None:
-                prev_modes = order_modes
-            for mode in order_modes:
-                mode_is_stable = any(
-                    [self.check_mode_stability(mode, other)
-                     for other in prev_modes])
-                if mode_is_stable:
+            for mode in modes[order]:
+                if mode not in filtered_modes[order]:
+                    continue
+                if mode in stable_modes[order]:
                     color = self.stable_color
                 else:
                     color = self.unstable_color
@@ -212,37 +227,78 @@ class StabilizationDiagram:
                     picker=True,
                     pickradius=self.pickradius)
                 lines[0].mode = mode
-            prev_modes = order_modes
+            
+    def filter_modes(self, modes):
+        """Filter out modes not relevant for further analysis.
+        
+        This method is called at the beginning of plot method to 
+        filter out modes that are not relevant for further analysis and 
+        which should be dropped in the stabilization diagram.
+        
+        In the default implementation, the following modes are filtered
+        out prior to plotting the stabilization diagram:
+        
+            * Unstable modes, i.e. modes with positive damping / poles 
+              with positive real part. 
+            * Modes with negative frequency, i.e. complex conjugate of 
+              mode / poles with negative imaginary part.
+              
+        Arguments
+        ---------
+        modes : dict
+            Dictionary where the key is the model order and
+            the value is a list of strid.Mode instances.
+            
+        Return
+        ------
+        dict 
+            Dictionary where the key is the model order and
+            the value is a list of filtered strid.Mode instances.
+        """
+        filtered_modes = {}
+        for order, ms in modes.items():
+            filtered_modes[order] = [mode for mode in ms
+                                     if ((mode.eigenvalue.real < 0.)
+                                         and mode.eigenvalue.imag > 0.)]
+        return filtered_modes
+            
+    def find_stable_modes(self, modes):
+        """Find all stable modes.
 
-    def check_mode_stability(self, mode, other):
-        """Check if a mode is stable in comparsion to other mode
-
-        The mode is considered stable in comparison to another mode
-        if the frequency, damping and modeshape is the same within a
-        tolerance.
+        A mode is considered stable if the frequency and damping 
+        is the same (within a tolerance) to a mode from the previous order.
 
         In the default state, the following stability criteria are
         considered:
 
-            * Frequency       : |f_mode-f_other|/f_other < 1%
-            * Damping ratio   : |xi_mode-xi_other|/xi_other < 5%
+            * Frequency       : |f_mode-f_prev|/f_prev < 1%
+            * Damping ratio   : |xi_mode-xi_prev|/xi_prev < 5%
             * Mode shape (MAC): 1 - MAC(q_mode, q_other) < 2%
 
-        Subclass and redefine the method to consider other stability
+        Subclass and redefine the method to define other stability
         criterions.
 
         Arguments
         ---------
-        mode, other : strid.Mode
-            Mode and other mode check similarity between.
+        modes : dict
+            Dictionary where the key (int) is the model order and
+            the value is a list of strid.Mode instances.
 
         Returns
         -------
-        bool
-            True if mode is stable according to stability criteria
+        dict : 
+            Dictionary where the key (int) is the model order and
+            the value is a list of stable strid.Mode instances.
         """
-        tol = {"dfreq": .01, "dxi": .05, "dmac": .02}
-        mac = modal_assurance_criterion(mode.v, other.v)
-        return ((np.abs(mode.f-other.f) / other.f < tol["dfreq"])
-                and (np.abs(mode.xi-other.xi) / other.xi < tol["dxi"])
-                and (1-mac < tol["dmac"]))
+        orders = sorted([*modes.keys()])
+        stable_modes = {}
+        stable_modes[orders[0]] = []
+        tol = {"f": .01, "xi": .05, "mac": .02}
+        for order_prev, order_current in zip(orders[:-1], orders[1:]):
+            stable_modes[order_current] = [mode for mode in modes[order_current]
+                                   if any([
+                                       (abs(mode.f-mode_prev.f)/mode_prev.f < tol["f"])
+                                       and (abs(mode.xi-mode_prev.xi)/mode_prev.xi < tol["xi"])
+                                       and (1-modal_assurance_criterion(mode.v, mode_prev.v) < tol["mac"])
+                                       for mode_prev in modes[order_prev]])]
+        return stable_modes

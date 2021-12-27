@@ -129,9 +129,7 @@ class Node:
     Arguments
     ---------
     coordinate : 1darray
-        Coordinate of the node in the domain.
-    description : Optional[str]
-        Description to help document the node.
+        Coordinate of the node.
     """
     def __init__(self, coordinate):
         self.coordinate = np.asfarray(coordinate)
@@ -159,6 +157,7 @@ class VertexElement(Element):
 
 class LineElement(Element):
     pass
+
 
 class TriangleElement(Element):
     pass
