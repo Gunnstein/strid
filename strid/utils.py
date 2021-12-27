@@ -5,8 +5,9 @@ import scipy.signal
 
 __all__ = ["find_rayleigh_damping_coeffs",
            "get_frequency_vector", "modal_assurance_criterion",
-           "find_psd_matrix", "w2f", "f2w", "norm2", "modal_scale_factor",
-           "modal_phase_collinearity", "mean_phase", "mean_phase_deviation",
+           "w2f", "f2w", "norm2", "modal_scale_factor", "modal_phase_collinearity", 
+           "mean_phase", "mean_phase_deviation", 
+           "find_psd_matrix", "find_positive_psd_matrix", "find_frf_matrix",
            "Mode",
            ]
 
@@ -193,30 +194,149 @@ def modal_assurance_criterion(u, v):
     return np.abs(H(u).dot(v))**2 / (H(u).dot(u) * H(v).dot(v)).real
 
 
-def find_psd_matrix(y, **kwargs):
-    """Calculate PSD matrix from timeseries
+def find_psd_matrix(x, y, **kwargs):
+    """Calculate PSD matrix for x and y.
 
     Arguments
     ---------
-    y : 2darray
+    x, y : 2darray
        Measurement matrix where each row corresponds to the entire time
        series of a measurement channel.
-    kwargs :
+    kwargs : optional
        All keyword arguments are passed to the scipy.signal.csd,
-       see docstring.
+       see docstring of scipy.signal.csd.
 
     Returns
     -------
     3darray
-       PSD (n x m x m) matrix where the first dimension refers to the
-       frequency of the psd estimator, see get_frequency_vector, and
-       the second and third dimensions refers to the degree of freedom
-       of the input and output as given in y.
+       PSD matrix where the first and second axis refers to the
+       degree of freedom of `x` and `y`, respectively and the third axis
+       refers to the frequency.
+       
+    See Also
+    --------
+    find_positive_psd_matrix
+        Positive lag psd matrix for frequency based operational modal 
+        analysis.
     """
-    Pyy = np.array(
-        [[scipy.signal.csd(yi, yj, **kwargs)[1]
-          for yj in y] for yi in y]).T
-    return Pyy
+    Pxy = np.array(
+        [[scipy.signal.csd(xi, yj, **kwargs)[1]
+          for yj in y] for xi in x])
+    return Pxy
+
+
+def find_positive_psd_matrix(x, y, nfft=2**9, window="rectangular"):
+    """Calculate positive lag PSD matrix
+    
+    Calculate the positive lag PSD matrix as per
+    [Cauberghe2004] (pg. 47, fig. 3.8). Useful in 
+    combined deterministic-stochastic or stochastic frequency domain
+    modal extraction methods such as LSCF and pLSCF. 
+    
+    Arguments
+    ---------
+    x, y : 2darray
+       Measurement matrix where each row corresponds to the entire time
+       series of a measurement channel.
+    nfft : int, optional
+        Length of the block/segment used in estimation of PSD. Note that
+        the number of samples from `x` and `y`, is half of `nfft`, i.e. 
+        `nperseg=nfft//2` and the segment is then zero padded.
+    window : str, optional
+        Which window to apply to remove the negative lag coefficients, must
+        be either `rectangular` or `exponential`. See [Cauberghe2004] 
+        implications of window estimated modal parameters.
+
+    Returns
+    -------
+    3darray
+       PSD matrix where the first and second axis refers to the
+       degree of freedom of `x` and `y`, respectively and the third axis
+       refers to the frequency.
+       
+    Raises
+    ------
+    ValueError
+        Raised if `window` parameter is not `rectangular` or `exponential`.
+       
+    See Also
+    --------
+    find_psd_matrix
+        Conventional psd matrix.
+    """
+    Pxy = find_psd_matrix(x, y, 
+                          nperseg=nfft//2, 
+                          nfft=nfft, 
+                          noverlap=0,
+                          window="boxcar",
+                         )
+    Rxy = np.fft.irfft(Pxy)
+    if window == "rectangular":
+        win = scipy.signal.boxcar(Rxy.shape[2])
+        win[Rxy.shape[2]//2:] *= 0.
+    elif window == "exponential":
+        tau = - Rxy.shape[2] / np.log(.01)
+        win = scipy.signal.exponential(Rxy.shape[2], center=0, tau=tau, sym=False)    
+    else:
+        raise ValueError(
+            "`window` must be either `rectangular` or exponential`"
+        )
+    Rxy *= win
+    return np.fft.rfft(Rxy)
+
+
+def find_frf_matrix(u, y, estimator="H1", **kwargs):
+    """Estimate the FRF matrix from input and output.
+    
+    Estimate the FRF matrix from input `u` and output `y`.
+    
+    Arguments
+    ---------
+    u, y : 2darray
+        Input and output where each row contains the data points 
+        for a particular channel.
+        
+    estimator : str
+        FRF estimator can be either `H1` or `H2`. The `H2` 
+        estimator requires an equal number of input and outputs
+        to exist.
+    
+    kwargs :
+       All keyword arguments are passed to the scipy.signal.csd,
+       see docstring.
+       
+    Returns
+    -------
+    3darray
+       FRF matrix where the first and second axis refers to the
+       degree of freedom of `y` and `u`, respectively and the third axis
+       refers to the frequency.
+       
+    Raises
+    ------
+    ValueError
+        If the `H2` estimator is selected, but the number of inputs does not 
+        match the number of outputs.
+    ValueError
+        If estimator is not `H1` or `H2`.
+    """
+    if estimator.upper() == "H1":
+        Sr = find_psd_matrix(u, u, **kwargs)
+        Sl = find_psd_matrix(y, u, **kwargs)
+    elif estimator.upper() == "H2":
+        if u.shape[0] != y.shape[0]:
+            raise ValueError(
+                "Number of inputs (u) must match number of outputs (y) for `H2` estimator."
+            )
+        Sr = find_psd_matrix(u, y, **kwargs)
+        Sl = find_psd_matrix(y, y, **kwargs)
+    else:
+        raise ValueError(
+            "FRF estimator must be either `H1` or `H2`."
+        )
+    H = np.moveaxis(np.array([
+        np.linalg.solve(Sr[:, :, i].T, Sl[:, :, i].T).T for i in range(Sr.shape[2])]), 0, 2)
+    return H
 
 
 class ShearFrame(object):
@@ -525,7 +645,6 @@ class Mode(object):
         This method finds all modes from the discrete state space system
         matrices A and C.
 
-
         Arguments
         ---------
         A : 2darray
@@ -539,12 +658,8 @@ class Mode(object):
         -------
         list
             List of modes (Mode objects)
-
         """
         lr, Q = np.linalg.eig(A)
         u = fs*np.log(lr)
-        mask = u.imag > 0
-        u = u[mask]
-        Q = Q[:, mask]
         Phi = C.dot(Q)
         return [cls(ui, q) for ui, q in zip(u, Phi.T)]

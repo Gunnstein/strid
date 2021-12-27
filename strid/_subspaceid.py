@@ -103,10 +103,10 @@ class AbstractReferenceBasedStochasticSID(abc.ABC):
             return_trace, the trace of the psd matrix is returned
             instead of the entire psd matrix.
         """
-        psd = find_psd_matrix(self.y, fs=self.fs, **kw)
-        f = get_frequency_vector(self.fs, psd.shape[0])
+        psd = find_psd_matrix(self.y, self.y, fs=self.fs, **kw)
+        f = get_frequency_vector(self.fs, psd.shape[2])
         if return_trace:
-            out = np.trace(psd, axis1=1, axis2=2)
+            out = np.trace(psd)
         else:
             out = psd
         return f, out
@@ -594,10 +594,10 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
             return_trace, the trace of the psd matrix is returned
             instead of the entire psd matrix.
         """
-        psd = find_psd_matrix(self.u, fs=self.fs, **kw)
-        f = get_frequency_vector(self.fs, psd.shape[0])
+        psd = find_psd_matrix(self.u, self.u, fs=self.fs, **kw)
+        f = get_frequency_vector(self.fs, psd.shape[2])
         if return_trace:
-            out = np.trace(psd, axis1=1, axis2=2)
+            out = np.trace(psd)
         else:
             out = psd
         return f, out
