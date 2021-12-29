@@ -364,10 +364,10 @@ class Mesh:
     def topology(self):
         nodenum_by_node = self.find_nodenumber_by_node
         element_types = set([element.vtk_type for element in self.elements])
-        topology = [
+        topology = [tuple(
             [element_type,[[nodenum_by_node(n) for n in element.nodes]
                            for element in self.elements
-                           if element.vtk_type==element_type]]
+                           if element.vtk_type==element_type]])
             for element_type in element_types]
         return topology
 
@@ -628,9 +628,9 @@ class SpatialModel:
     def topology(self):
         nodenum_by_node = self.mesh.find_nodenumber_by_node
         element_types = set([element.vtk_type for element in self.mesh.elements])
-        topology = [
+        topology = [tuple(
             [element_type,[[nodenum_by_node(n) for n in element.nodes]
                            for element in self.mesh.elements
-                           if element.vtk_type==element_type]]
+                           if element.vtk_type==element_type]])
             for element_type in element_types]
         return topology

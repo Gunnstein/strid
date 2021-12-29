@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from ._fdid import *
 from . import spatial
 from .stabdiag import *
 from . import stabdiag

@@ -27,16 +27,16 @@ def create_block_hankel_matrix(data, block_rows, ncols=None, ix_ref=None):
         time.
     block_rows : int
         Number of block rows
-    ncols : Optional[int]
+    ncols : int, optional
         Number of columns in block hankel matrix. If None,
         all data in the data matrix is used.
-    ix_ref : Optional[list]
+    ix_ref : list, optional
         Indices to the reference outputs in y. If `None`, all outputs
         are considered to be references.
 
     Returns
     -------
-    ndarray
+    2darray
         Block hankel matrix from data array
     """
     l, s = data.shape
@@ -66,7 +66,7 @@ class AbstractReferenceBasedStochasticSID(abc.ABC):
             Output data matrix (l x s) from `l` outputs with `s` samples.
         fs : float
             Sampling rate
-        ix_references : Optional[list]
+        ix_references : list, optional
             Indices to the reference outputs in y. If `None`, all outputs
             are considered to be references.
         """
@@ -86,7 +86,7 @@ class AbstractReferenceBasedStochasticSID(abc.ABC):
 
         Arguments
         ---------
-        return_trace : Optional[bool]
+        return_trace : bool, optional
             Return the entire psd matrix or only the trace of the psd matrix.
         kw : dict
             See keywords to scipy.signal.csd and scipy.signal.welch.
@@ -168,9 +168,10 @@ class AbstractReferenceBasedStochasticSID(abc.ABC):
 class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
     """Stochastic subspace identificator
 
-    Given measurements of output `y` identify the
-    system matrices A, C, and the covariance matrices Q, R, S
-    of the process noise `w` and measurement noise `v` for the system
+    Given measurements of output :math:`y` identify the system
+    matrices :math:`A, C`, and the covariance matrices :math:`Q, R, S`
+    of the process noise :math:`w` and measurement noise :math:`v` for
+    the system.
 
     .. math::
 
@@ -191,7 +192,6 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
         for output only modal analysis.
         Mechanical Systems and Signal Processing 13, 855–878.
         doi: 10.1006/mssp.1999.1249
-
     """
     def __init__(self, y, fs, ix_references=None):
         """Reference-based covariance-driven stochastic subspace identicator.
@@ -206,7 +206,7 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
             Output data matrix (l x s) from `l` outputs with `s` samples.
         fs : float
             Sampling rate (Hz)
-        ix_references : Optional[list]
+        ix_references : list, optional
             Indices to the reference outputs in y. If `None`, all outputs
             are considered to be references.
 
@@ -221,7 +221,6 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
             for output only modal analysis.
             Mechanical Systems and Signal Processing 13, 855–878.
             doi: 10.1006/mssp.1999.1249
-
         """
         self.y = y
         self.fs = fs
@@ -241,7 +240,7 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
 
         Returns
         -------
-        ndarray
+        2darray
             Correlation matrix
         """
         s = self.s
@@ -259,14 +258,13 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
 
         Returns
         -------
-        ndarray
+        2darray
             Block toeplitz matrix from output correlations
         """
         Y = self._Y(i)
         Yp = Y[:self.r*i]
         Yf = Y[self.r*i:]
         return Yf @ Yp.T
-
 
     @functools.lru_cache(maxsize=20, typed=False)
     def _svd_block_toeplitz(self, i):
@@ -343,9 +341,10 @@ class CovarianceDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
 class DataDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
     """Stochastic subspace identificator
 
-    Given measurements of output `y` identify the
-    system matrices A, C, and the covariance matrices Q, R, S
-    of the process noise `w` and measurement noise `v` for the system
+    Given measurements of output :math:`y` identify the system
+    matrices :math:`A`, :math:`C`, and the covariance matrices
+    :math:`Q, R, S` of the process noise :math:`w` and measurement
+    noise :math:`v` for the system
 
     .. math::
 
@@ -365,7 +364,7 @@ class DataDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
             Output data matrix (l x s) from `l` outputs with `s` samples.
         fs : float
             Sampling rate (Hz)
-        ix_references : Optional[list]
+        ix_references : list, optional
             Indices to the reference outputs in y. If `None`, all outputs
             are considered to be references.
 
@@ -502,14 +501,16 @@ class DataDrivenStochasticSID(AbstractReferenceBasedStochasticSID):
 class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
     """Combined deterministic stochastic subspace identificator
 
-    Given measurments of output `y` and input `u` identify the
-    system matrices A, B, C, D and the covariance matrices Q, R, S
-    of the process noise `w` and measurement noise `v` for the system
+    Given measurments of output :math:`y` and input :math:`u` identify
+    the system matrices :math:`A, B, C, D` and the covariance matrices
+    :math:`Q, R, S` of the process noise `w` and measurement noise `v`
+    for the system
 
     .. math::
 
         x_{k+1} = Ax_k + Bu_k + w_k
         y_k = Cx_k + Du_k + v_k
+
     """
     def __init__(self, u, y, fs, ix_references=None):
         """Reference-based combined deterministic-stochastic subspace identicator.
@@ -527,7 +528,7 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
             Output data matrix (l x s) from `l` outputs with `s` samples.
         fs : float
             Sampling rate (Hz)
-        ix_references : Optional[list]
+        ix_references : list, optional
             Indices to the reference outputs in y. If `None`, all outputs
             are considered to be references.
 
@@ -577,7 +578,7 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
 
         Arguments
         ---------
-        return_trace : Optional[bool]
+        return_trace : bool, optional
             Return the entire psd matrix or only the trace of the psd matrix.
         kw : dict
             See keywords to scipy.signal.csd and scipy.signal.welch.
@@ -682,10 +683,10 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
         block_rows : int
             Number of block rows, note `order / block_rows <= r`
             where `r` is the number of reference outputs.
-        estimate_B_and_D : Optional[bool]
+        estimate_B_and_D : bool, optional
             Estimate and return the input matrix `B` and the direct feedthrough
             matrix `D`.
-        estimate_covariances : Optional[bool]
+        estimate_covariances : bool, optional
             Estimate and return the covariance matrix `Q` of the
             process noise (stochastic load), covariance matrix `R` of
             the measurement noise and the covariance matrix `S`
@@ -695,21 +696,21 @@ class CombinedDeterministicStochasticSID(AbstractReferenceBasedStochasticSID):
         -------
         A : 2darray
             System matrix of state space model.
-        B : Optional[2darray]
+        B : 2darray, optional
             Input matrix of state space model, only returned if `estimate_B_and_D`
             is True.
         C : 2darray
             Output matrix of state space model.
-        D : Optional[2darray]
+        D : 2darray, optional
             Direct feedthrough matrix of state space model, only returned if
             `estimate_B_and_D` is True.
-        Q : Optional[2darray]
+        Q : 2darray, optional
             Covariance matrix of the process noise, only returned if
             `estimate_covariances` is True.
-        R : Optional[2darray]
+        R : 2darray, optional
             Covariance matrix of the measurement noise, only returned if
             `estimate_covariances` is True.
-        S : Optional[2darray]
+        S : 2darray, optional
             Covariance matrix between the process and measurement noise,
             only returned if `estimate_covariances` is True.
 
