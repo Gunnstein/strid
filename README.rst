@@ -9,6 +9,19 @@ However, the identification methods are applicable to linear
 time-invariant systems, and the implementation may also be used in
 other domains.
 
+The primary focus of this package is to provide funtionality to
+identify models of linear time-invariant systems.
+
+Additionally, the package has a class for stabilization diagrams for
+selecting modes interactively, a `spatial` module for establishing a
+spatial model of a structure and converting a mode shape vector to a
+deformation array for a higher order 3D mesh and a class for plotting
+and animating mode shapes on spatial models with matplotlib. Below is
+an animation of the first horizontal bending mode of the railway
+bridge at Hell, identified and animated by `strid` alone:
+
+|hell_animation|
+
 
 
 Installation
@@ -37,19 +50,6 @@ or install directly from the python package index
 
 Usage
 -----
-
-The primary focus of this package is to provide funtionality to
-identify models of linear time-invariant systems.
-
-Additionally, the package has a class for stabilization diagrams for
-selecting modes interactively, a `spatial` module for establishing a
-spatial model of a structure and converting a mode shape vector to a
-deformation array for a higher order 3D mesh and a class for plotting
-and animating mode shapes on spatial models with matplotlib. Below is
-an animation of the first horizontal bending mode of the railway
-bridge at Hell, identified and animated by `strid` alone:
-
-|hell_animation|
 
 The code example below shows how the modes of a combined
 deterministic-stochastic system can be obtained from measurements of
