@@ -6,8 +6,6 @@ from ..utils import ShearFrame
 from .. import *
 
 
-
-
 class TestShearFrame(unittest.TestCase):
     def setUp(self):
         self.n = 5
@@ -123,6 +121,8 @@ class TestUtils(unittest.TestCase):
         self.assertAlmostEqual(
             modal_assurance_criterion(u, u+v),
             (7*7)**2 / (7**2*norm2(u+v)**2))
+
+
 
 
 if __name__ == "__main__":

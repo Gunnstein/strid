@@ -67,6 +67,7 @@ class ModePicker(object):
     def __call__(self, event):
         artist = event.artist
         ms = artist.get_markersize()
+        figure = artist.get_figure()
         mode = artist.mode
         try:
             oms = artist._original_markersize
@@ -83,6 +84,8 @@ class ModePicker(object):
             artist.set_mec(artist.get_mfc())
             self.remove(mode)
             self.on_remove(event)
+        figure.canvas.draw_idle()
+        figure.canvas.flush_events()
 
 
 class TableModePicker(ModePicker):
@@ -93,6 +96,7 @@ class TableModePicker(ModePicker):
         ---------
         mpl_axes : matplotlib.Axes
             Axes to add the table of picked modes to
+
         """
         super(TableModePicker, self).__init__()
         self.mpl_axes = mpl_axes
@@ -109,12 +113,15 @@ class TableModePicker(ModePicker):
         if len(self.picked) > 0:
             sorted_modes = self.picked
             cell_text = [
-                (f"{mode.f:.2f}", f"{mode.xi:.2%}", f"{mode.mpc:.1%}")
+                (f"{mode.f:.2f}Hz",
+                 f"{mode.xi:.2%}",
+                 f"{mode.mpc:.1%}",
+                 f"{mode.mp/np.pi*180:.1f}°")
                 for j, mode in enumerate(sorted_modes)]
             self.mpl_axes.table(
                 cell_text,
-                colLabels=("Frequency (Hz)", "Damping", "MPC"),
-                rowLabels=[f"{j+1:n}" for j in range(len(sorted_modes))],
+                colLabels=("Frequency", "Damping", "MPC", "MP"),
+                rowLabels=[f"{j:n}" for j in range(len(sorted_modes))],
                 loc='upper left')
 
 
@@ -124,11 +131,12 @@ class StabilizationDiagram:
     One fundamental issue in system identification is that the model
     order is an unknown parameter. The solution is to overestimate the
     model order and then separate physical modes from the spurious
-    numerical ones. There exists several approaches to accomplish this,
-    but a common approach is to use a _stabilization diagram_ which
-    plots the system poles of increasing order and identifies a pole
-    as stable if it is repeated (within tolerance) for increasing
+    numerical ones. There exists several approaches to accomplish
+    this, but a common approach is to use a _stabilization diagram_
+    which plots the system poles of increasing order and identifies a
+    pole as stable if it is repeated (within tolerance) for increasing
     model order.
+
     """
     stable_color = (0, 1, 0, .3)
     unstable_color = (1, 0, 0, .3)
@@ -153,9 +161,9 @@ class StabilizationDiagram:
         the `picked_modes` property
 
         Plot modes with the `plot` method.
-        
+
         The PSD can be superimposed on the stabilization diagram by
-        accessing/using the attribute `axes_psd` which is a matplotlib.Axes 
+        accessing/using the attribute `axes_psd` which is a matplotlib.Axes
         instance.
         """
         self.figure = plt.figure(figure_name, figsize=self.figsize,
@@ -167,7 +175,7 @@ class StabilizationDiagram:
         self.axes_psd.set(xlabel='Frequency (Hz)', ylabel='PSD',
                            title='Stabilization Diagram')
         self.axes_psd.yaxis.set_visible(False)
-        
+
         self.axes_plot = self.axes_psd.twinx()
         self.axes_plot.set(ylabel="Model order")
         self.axes_plot.yaxis.tick_left()
@@ -199,11 +207,11 @@ class StabilizationDiagram:
         modes : dict
             Dictionary where the key is the model order and
             the value is a list of strid.Mode instances.
-            
+
         See Also
         --------
         filter_modes
-            Method to filter out modes not relevant for further analysis and 
+            Method to filter out modes not relevant for further analysis and
             thus not plotted in stabilization diagram.
         find_stable_modes
             Method to classify stable modes.
@@ -227,31 +235,31 @@ class StabilizationDiagram:
                     picker=True,
                     pickradius=self.pickradius)
                 lines[0].mode = mode
-            
+
     def filter_modes(self, modes):
         """Filter out modes not relevant for further analysis.
-        
-        This method is called at the beginning of plot method to 
-        filter out modes that are not relevant for further analysis and 
+
+        This method is called at the beginning of plot method to
+        filter out modes that are not relevant for further analysis and
         which should be dropped in the stabilization diagram.
-        
+
         In the default implementation, the following modes are filtered
         out prior to plotting the stabilization diagram:
-        
-            * Unstable modes, i.e. modes with positive damping / poles 
-              with positive real part. 
-            * Modes with negative frequency, i.e. complex conjugate of 
+
+            * Unstable modes, i.e. modes with positive damping / poles
+              with positive real part.
+            * Modes with negative frequency, i.e. complex conjugate of
               mode / poles with negative imaginary part.
-              
+
         Arguments
         ---------
         modes : dict
             Dictionary where the key is the model order and
             the value is a list of strid.Mode instances.
-            
+
         Return
         ------
-        dict 
+        dict
             Dictionary where the key is the model order and
             the value is a list of filtered strid.Mode instances.
         """
@@ -261,11 +269,11 @@ class StabilizationDiagram:
                                      if ((mode.eigenvalue.real < 0.)
                                          and mode.eigenvalue.imag > 0.)]
         return filtered_modes
-            
+
     def find_stable_modes(self, modes):
         """Find all stable modes.
 
-        A mode is considered stable if the frequency and damping 
+        A mode is considered stable if the frequency and damping
         is the same (within a tolerance) to a mode from the previous order.
 
         In the default state, the following stability criteria are
@@ -286,7 +294,7 @@ class StabilizationDiagram:
 
         Returns
         -------
-        dict : 
+        dict :
             Dictionary where the key (int) is the model order and
             the value is a list of stable strid.Mode instances.
         """

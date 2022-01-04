@@ -1,37 +1,37 @@
 # -*- coding: utf-8 -*-
+import abc
 import copy
 import itertools
 import numpy as np
+import matplotlib
+import matplotlib.animation
+import matplotlib.colors
+import matplotlib.pyplot as plt
 
 
 def isometric_projection(X, vertical_axis="z", view_from_octant="++"):
     """Isometric projection of coordinates from 3D to 2D
 
-    Isometric projection of coordinate X=(x, y, z) in
-    3D space to 2D space X'=(x', y').
-
-    The view is from the first octant (`+++`) z-axis is
-    the vertical axis in the transformed system.
+    Isometric projection of coordinate X=(x, y, z) in 3D space to 2D
+    space X'=(x', y').
 
     Arguments
     ---------
     X : 2darray
-        (3xn) array with x, y and z coordinates to
-        be projected onto the isometric view.
-    vertical_axis : Optional[str]
-        Vertical axis. Possible values are 'x', 'y',
-        or 'z'.
-    view_from_octant : Optional[str]
-        Octant the coordinate system is viewed from.
-        Possible values are '++', '+-', '-+', or '--'
-        where the first character denotes the first
-        axis (x,y,z) that is not the vertical axis.
+        (nx3) array with x, y and z coordinates to be projected onto
+        the isometric view.
+    vertical_axis : {'x', 'y', 'z'}, optional
+        Vertical axis in projected coordinates.
+    view_from_octant : {'++', '+-', '-+', '--'}, optional
+        Octant the coordinate system is viewed from. First character
+        denotes the first axis (x,y,z) that is not the vertical axis.
 
     Returns
     -------
     x : 2darray
-        (2xn) array with the x, y coordinates of the
-        isometric viewplane.
+        (nx2) array with the x, y coordinates of the isometric
+        viewplane.
+
     """
     c = np.cos
     s = np.sin
@@ -76,13 +76,298 @@ def isometric_projection(X, vertical_axis="z", view_from_octant="++"):
     Rb = {"x": Rx, "y": Ry, "z": Rz}[vertical_axis](b)
 
     p = {"x": [1., 0., 0.],
-         "y":[0., 1., 0.],
-         "z":[0., 0., 1.],}
+         "y": [0., 1., 0.],
+         "z": [0., 0., 1.],}
     P = np.array([
         p[a_axis],
         p[vertical_axis]])
 
-    return P @ Ra @ Rb @ X
+    return ((P @ Ra @ Rb) @ X.T).T
+
+
+class AbstractVisualizer(abc.ABC):
+    """Visualize spatial models and meshes with matplotlib.
+
+    This class provides functionality to plot and animate modes with
+    matplotlib, see `plot`, `plot_elements`, `plot_nodenumbers` and
+    `animate` methods.
+
+    The "view" or camera placement of the spatial model is defined
+    by the `projection` method. Concrete subclasses must implement
+    `projection` method.
+
+    """
+    def __init__(self, model, axes=None):
+        """Create a visualizer of a mesh or a spatial model.
+
+        Arguments
+        ---------
+        model : {strid.spatial.Mesh, strid.spatial.SpatialModel}
+            Mesh or SpatialModel to visualize. Note, functionality of
+            methods are limited when initialized with Mesh.
+        axes : matplotlib.axes.Axes, optional
+            Axes to visualize on.
+
+        """
+        self.model = model
+
+        if axes is None:
+            _, self.axes = plt.subplots()
+            self.axes.axis('off')
+            self.axes.set_aspect('equal')
+        else:
+            self.axes = axes
+
+    @property
+    def figure(self):
+        return self.axes.figure
+
+    @abc.abstractmethod
+    def projection(self, X):
+        """Projection from coordinates in 3D to 2D.
+
+        This method projects coordinates
+        :math:`X\\in\\mathbb{R}^{n\\times 3}` (3D space) to coordinates
+        :math:`X'\\in\\mathbb{R}^{n\\times 2}` (2D space).
+
+        Arguments
+        ---------
+        X : 2darray
+            (nx3) array with x, y and z coordinates to
+            be projected.
+
+        Returns
+        -------
+        2darray
+            (nx2) array with the projected x', y' coordinates.
+
+        """
+        pass
+
+    def plot_elements(self, mode=None, amplitude=1.0, colormap=None,
+                      **kwargs):
+        """Plot the elements of the spatial model.
+
+        Plot the elements of the spatial model, if mode is `None`, the
+        undeformed model is plotted.
+
+        Arguments
+        ---------
+        mode : strid.Mode, optional
+            Plot the deformed spatial model as defined by the mode.
+        amplitude : float or complex, optional
+            Amplitude to be applied to the modeshape.
+        colormap : str or matplotlib.colors.ColorMap, optional
+            Colormap to be applied to the deformation vector. If
+            keyword `colors` is given, `colormap` is ignored.
+        kwargs : dict, optional
+            All keyword arguments are passed to matplotlib.Axes.plot
+            method.
+
+        Returns
+        -------
+        list
+            List of matplotlib.artist.Artist instances of the plotted
+            elements.
+
+        Raises
+        ------
+        NotImplementedError
+            NotImplementedError is raised if the mesh consists of any
+            other elements than LineElements.
+        ValueError
+            ValueError is raised if the `mode` keyword is used when
+            class was initialized with a `Mesh`, must initialize with
+            a consistent `SpatialModel` to be able to convert mode
+            shape of Mode to node deformation array of mesh.
+
+        """
+        if mode is None:
+            U = np.zeros_like(self.model.X0)
+            if "color" not in kwargs:
+                kwargs["color"] = 'k'
+        else:
+            if isinstance(self.model, Mesh):
+                raise ValueError(
+                    "Visualizer initialized with Mesh instance, cannot plot mode.")
+            U = self.model.U(mode.v*np.exp(-1j*mode.mp))
+        if "color" not in kwargs:
+            cmap = matplotlib.cm.get_cmap(colormap)
+        else:
+            cmap = matplotlib.colors.ListedColormap([kwargs["color"]])
+        uabs = np.linalg.norm(np.abs(amplitude*U), axis=1)
+        umax, umin = uabs.max(), uabs.min()
+        u = np.linalg.norm((amplitude*U).real, axis=1)
+        u -= umin
+        if umax != 0:
+            u /= umax
+        U = amplitude * U
+
+        artists = []
+        X = self.model.X0 + U.real
+        for el_type, connectivity in self.model.topology:
+            if not el_type == "line":
+                raise NotImplementedError(
+                    "Only plotting of LineElements implemented.")
+            for node_ixs in connectivity:
+                color = cmap(u[node_ixs].mean())
+                kwargs["color"] = color
+                Xc = X[node_ixs]
+                x, y = self.projection(Xc).T
+                ls, = self.axes.plot(x, y, **kwargs)
+                artists.append(ls)
+        return artists
+
+    def plot_nodes(self, **kwargs):
+        """Plot the nodes of the spatial model on the axes.
+
+        Arguments
+        ---------
+        kwargs : dict, optional
+            All keyword arguments are passed to matplotlib.Axes.plot
+            method.
+
+        """
+        if "color" not in kwargs:
+            kwargs["color"] = 'k'
+        artists = []
+        for i, Xi in enumerate(self.model.X0):
+            x, y = self.projection(Xi).T
+            ap, = self.axes.plot(x, y, **kwargs)
+            artists.append(ap)
+        return artists
+
+    def plot_nodenumbers(self, **kwargs):
+        """Plot the nodenumbers of the spatial model on the axes.
+
+        Arguments
+        ---------
+        kwargs : dict, optional
+            All keyword arguments are passed to matplotlib.Axes.text
+            method.
+
+        """
+        artists = []
+        for i, Xi in enumerate(self.model.X0):
+            x, y = self.projection(Xi).T
+            at = self.axes.text(x, y, f"{i}", **kwargs)
+            artists.append(at)
+        return artists
+
+    def plot(self, kw_els={}, kw_nodes={}, kw_nodenums={}):
+        """Plot the undeformed model.
+
+        This method combines the `plot_elements`, `plot_nodes`
+        and `plot_nodenumbers` methods.
+
+        Arguments
+        ---------
+        kw_els, kw_nodes, kw_nodenums : dict, optional
+            Keyword arguments passed to `plot_elements`, `plot_nodes`
+            and `plot_nodenumbers` methods.
+
+        """
+        if ("lw" not in kw_els) and ("linewidth" not in kw_els):
+            kw_els["lw"] = .3
+        self.plot_elements(**kw_els)
+        self.plot_nodes(**kw_nodes)
+        self.plot_nodenumbers(**kw_nodenums)
+
+
+    def animate(self, mode, amplitude=1.0, nframes=16, **kwargs):
+        """Animate the mode shape
+
+        Create an animation of the mode shape.
+
+        Arguments
+        ---------
+        mode : strid.Mode
+            Mode shape to create an animation of.
+        amplitude : float or complex, optional
+            Amplitude to be applied to the modeshape.
+        nframes : int, optional
+            Number of frames used to animate a full cycle of the modeshape.
+        kwargs : dict, optional
+            All keyword arguments are passed to matplotlib.Axes.plot
+            method.
+
+        Returns
+        -------
+        matplotlib.animation.Animation
+            Instance of Animation class from matplotlib. Important
+            methods of this instance are `pause`, `resume` and `save`,
+            see matplotlib documentation.
+
+        Raises
+        ------
+        ValueError
+            ValueError is raised if the class was initialized with a
+            `Mesh`, must initialize with a consistent `SpatialModel`
+            to be able to convert mode shape of Mode to node
+            deformation array of mesh and produce animation.
+
+        """
+        if isinstance(self.model, Mesh):
+            raise ValueError(
+                "Visualizer initialized with Mesh instance, cannot animate mode.")
+        angle = 2*np.pi*np.arange(nframes)/nframes
+        scales = amplitude * np.exp(1j*angle)
+        artists = []
+        for scale in scales:
+            artists.append(
+                self.plot_elements(
+                    mode=mode, amplitude=scale, animated=True, **kwargs))
+        animation = matplotlib.animation.ArtistAnimation(
+            self.figure, artists, interval=1000./nframes)
+        return animation
+
+
+class VisualizerIsometric(AbstractVisualizer):
+    """Visualize a mesh or spatial model with matplotlib
+
+    This visualizer implements an isometric projection for converting
+    the coordinates of the the 3D mesh or spatial model to 2D
+    coordinates.
+
+    """
+    def projection(self, X):
+        return isometric_projection(X)
+
+
+class VisualizerXY(AbstractVisualizer):
+    """Visualize a mesh or spatial model with matplotlib
+
+    This visualizer projects the coordinates of the 3D mesh or spatial
+    model to XY plane.
+
+    """
+    def projection(self, X):
+        P = np.array([[1., 0., 0.], [0., 1., 0.]])
+        return (P@X.T).T
+
+
+class VisualizerXZ(AbstractVisualizer):
+    """Visualize a mesh or spatial model with matplotlib
+
+    This visualizer projects the coordinates of the 3D mesh or spatial
+    model to XZ plane.
+
+    """
+    def projection(self, X):
+        P = np.array([[1., 0., 0.], [0., 0., 1.]])
+        return (P@X.T).T
+
+
+class VisualizerYZ(AbstractVisualizer):
+    """Visualize a mesh or spatial model with matplotlib
+
+    This visualizer projects the coordinates of the 3D mesh or spatial
+    model to YZ plane.
+
+    """
+    def projection(self, X):
+        P = np.array([[0., 1., 0.], [0., 0., 1.]])
+        return (P@X.T).T
 
 
 class StridError(Exception):
@@ -93,7 +378,7 @@ class DOF:
     """Define a degree of freedom (DOF)
 
     A degree of freedom has a number that defines the direction
-    in 3D space. The numbers are ordered accoring to the right
+    in 3D space. The numbers are ordered according to the right
     hand rule.
 
 
@@ -106,9 +391,10 @@ class DOF:
                         x, 0
 
 
-    Typically, the DOF object is not instantiated directly by
-    the user, the user instead defines a Node object that is
-    responsible for defining the DOFs.
+    Typically, the DOF object is not instantiated directly by the
+    user, the user instead defines a Node object that is responsible
+    for defining the DOFs.
+
     """
     def __init__(self, number):
         self.number = number
@@ -130,6 +416,7 @@ class Node:
     ---------
     coordinate : 1darray
         Coordinate of the node.
+
     """
     def __init__(self, coordinate):
         self.coordinate = np.asfarray(coordinate)
@@ -142,6 +429,7 @@ class Element:
     A element can be a vertex, line, surface (area) or volume and is
     defined by an appropriate number of nodes (e.g. one node for a
     vertex, two for a line, etc).
+
     """
     def __init__(self, *args):
         self.nodes = args
@@ -198,31 +486,30 @@ class Mesh:
 
         Example
         -------
-
         This example shows how to create a mesh for a shear frame
         with 5 floors, each floor 3.0 units high and 5.0 units wide.
 
         >>> nodes = [Node((0., 0., i*3.0)) for i in range(6)]
-        >>> elements = [Line(nodes[i], nodes[i+1]) for i in range(5)]
+        >>> elements = [LineElement(nodes[i], nodes[i+1]) for i in range(5)]
         >>> mesh_left_column = Mesh(nodes=nodes, elements=elements)
 
         We create the right column by creating a copy of the left
-        column and translating it 5.0 units in the y-direction.
+        column and translating it 5.0 units in the x-direction.
 
         >>> mesh_right_column = mesh_left_column.copy()
-        >>> mesh_right_column.translate((0., 5., 0.))
+        >>> mesh_right_column.translate((5., 0., 0.))
 
         Finally, we create the mesh of the shear frame by using the
         meshes for the left and the right column and connecting the
         nodes from those submeshes with a line element.
 
         >>> floor_elements = [
-        ... Line(node_left, node_right) for node_left, node_right in
-        ... zip(mesh_left_column.nodes, mesh_right_column.nodes)
+        ... LineElement(node_left, node_right) for node_left, node_right in
+        ... zip(mesh_left_column.nodes[1:], mesh_right_column.nodes[1:])
         ... ]
         >>> mesh_shear_frame = Mesh(
         ... elements=floor_elements,
-        ... meshes=[mesh_left_column[1:], mesh_right_column[1:]]
+        ... meshes=[mesh_left_column, mesh_right_column]
         ... )
 
         and now we have our mesh for the shear frame. Note that
@@ -245,6 +532,7 @@ class Mesh:
         >>> dof1_at_origin = node_at_origin.dofs[0]
         >>> mesh_shear_frame.find_nodenumber_by_dof(dof1_at_origin)
         0
+
         """
         self._elements = elements or []
         self._nodes = nodes or []
@@ -255,14 +543,14 @@ class Mesh:
         nodes = []
         for mesh in self.meshes:
             for node in mesh.nodes:
-                if not node in nodes:
+                if node not in nodes:
                     nodes.append(node)
         for element in self.elements:
             for node in element.nodes:
-                if not node in nodes:
+                if node not in nodes:
                     nodes.append(node)
         for node in self._nodes:
-            if not node in nodes:
+            if node not in nodes:
                 nodes.append(node)
         return nodes
 
@@ -282,16 +570,17 @@ class Mesh:
         elements = []
         for mesh in self.meshes:
             for element in mesh.elements:
-                if not element in elements:
+                if element not in elements:
                     elements.append(element)
         for element in self._elements:
-            if not element in elements:
+            if element not in elements:
                 elements.append(element)
         return elements
 
     @elements.setter
     def elements(self, v):
-        raise StridError("Add element/elements with the `add_element`/`add_elements` method.")
+        raise StridError(
+            "Add element/elements with the `add_element`/`add_elements` method.")
 
     @property
     def meshes(self):
@@ -332,7 +621,6 @@ class Mesh:
 
     def copy(self):
         return copy.deepcopy(self)
-
 
     def find_node_by_coordinate(self, coordinate):
         c = np.asfarray(coordinate)
@@ -377,11 +665,14 @@ class LinearConstraint:
 
     A linear constraint equation between dofs is defined by
 
-        $\sum_{j=0}^{n-1} g_ju_j + c = 0$
+    .. math::
 
-    where g_j are the constraint coefficients, u_j is the
-    j'th dof of the n dof model and c is the constant
+        \\sum_{j=0}^{n-1} g_ju_j + c = 0
+
+    where :math:`g_j` are the constraint coefficients, :math:`u_j` is
+    the j'th dof of the n dof model and :math:`c` is the constant
     (non-homogeneous) term of the constraint.
+
     """
     def __init__(self, dofs, coefficients, constant=0.0):
         """Create a linear constraint equation between dofs.
@@ -392,7 +683,7 @@ class LinearConstraint:
             DOFs involved in the constraint.
         coefficients : 1darray
             Constraint coefficients, must be of same length as `dofs`.
-        c : Optional[float]
+        c : float, optional
             Constant in the constraint equation
         """
         self.dofs = dofs
@@ -430,7 +721,7 @@ class SpatialModel:
         sensors : list[DOF]
             List of dofs where sensors are installed and used to
             measure response for system identification.
-        constraints : Optional[list[LinearConstraint]]
+        constraints : list[LinearConstraint], optional
             List of LinearConstraint objects that defines the deformation
             of non-sensor dofs in terms of the sensor dofs or constrain
             them to a constant value (e.g. zero).
@@ -472,8 +763,11 @@ class SpatialModel:
                   (independent) nor a dependent dof. Add constraint with
                   relevant dof.
         """
-        nodenum_by_node = {node:i for i, node in enumerate(self.mesh.nodes)}
-        node_by_dof = {dof:node for node in self.mesh.nodes for dof in node.dofs}
+        nodenum_by_node = {node: i
+                           for i, node in enumerate(self.mesh.nodes)}
+        node_by_dof = {dof: node
+                       for node in self.mesh.nodes
+                       for dof in node.dofs}
 
         independent_dofs = self.sensors
         err_str_indep = [
@@ -487,7 +781,8 @@ class SpatialModel:
                         f"\tNode {nodenum}, DOF {dof.number} ({dof.axis}-dir) (sensor dof), constrained to other sensor dof or to predefined value.")
 
         dependent_dofs = []
-        err_str = ["Constraint error(s), non-sensor dofs must be present in one and only one constraint equation."]
+        err_str = [
+            "Constraint error(s), non-sensor dofs must be present in one and only one constraint equation."]
         for constraint in self.constraints:
             for dof in constraint.dofs:
                 if dof in independent_dofs:
@@ -511,11 +806,11 @@ class SpatialModel:
             nodenum = nodenum_by_node[node]
             err_str.append(f"\tNode {nodenum}, DOF {dof.number} ({dof.axis}-dir) is not present in any constraint.")
 
-        if (len(err_str_indep) > 1) and (len(err_str)>1):
+        if (len(err_str_indep) > 1) and (len(err_str) > 1):
             errors = err_str_indep + err_str
-        elif (len(err_str_indep)>1) and (len(err_str)==1):
+        elif (len(err_str_indep) > 1) and (len(err_str) == 1):
             errors = err_str_indep
-        elif (len(err_str_indep)==1) and (len(err_str)>1):
+        elif (len(err_str_indep) == 1) and (len(err_str) > 1):
             errors = err_str
         else:
             errors = []
@@ -568,6 +863,7 @@ class SpatialModel:
         2darray
             n x 3 array with the coordinates of the nodes with an undeformed
             geometry.
+
         """
         return np.array([node.coordinate for node in self.mesh.nodes])
 
@@ -587,11 +883,13 @@ class SpatialModel:
         -------
         U : 2darray
             Deformation array (nx3)
+
         """
+        u = np.asarray(u)
         self._assign_equation_numbers()
         T, s = self._assemble_equations()
         v = T@u + s
-        U = np.zeros((len(self.mesh.nodes), 3), dtype=float)
+        U = np.zeros((len(self.mesh.nodes), 3), dtype=u.dtype)
         nodenums = {node: i for i, node in enumerate(self.mesh.nodes)}
         for dof, eqnum in self._eqnums.items():
             i = nodenums[self.mesh.find_node_by_dof(dof)]
@@ -610,6 +908,8 @@ class SpatialModel:
         Formally, the deformation matrix `X(u)` is defined as the sum of
         the undeformed geometry `X0` and the deformation `U(u)`
 
+        .. math::
+
             X(u) = X0 + U(u)
 
         Arguments
@@ -621,6 +921,7 @@ class SpatialModel:
         -------
         U : 2darray
             Deformed geometry of (nx3)
+
         """
         return self.X0 + self.U(u)
 

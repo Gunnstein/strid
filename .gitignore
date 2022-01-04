@@ -11,3 +11,8 @@
 !examples/
 !examples/*.ipynb
 !examples/*.gif
+!examples/01-shear-frame/
+!examples/01-shear-frame/*.ipynb
+!examples/01-shear-frame/*.html
+!examples/01-shear-frame/results/
+!examples/01-shear-frame/results/*.gif
