@@ -2,10 +2,12 @@
 strid
 =====
 
-Python package for system identification of mechanical systems.
+Python package for system identification of linear time-invariant systems.
 
-Most of the identification methods are applicable to linear time-invariant systems,
-and the implementation may also be used in other domains.
+The package is written from a structural engineering perspective.
+However, the identification methods are applicable to linear
+time-invariant systems, and the implementation may also be used in
+other domains.
 
 
 
@@ -29,16 +31,25 @@ or install directly from github
 or install directly from the python package index
 
 ::
-   
+
    pip install strid
 
 
 Usage
 -----
 
-The package provides funtionality to identify structural systems through
-subspace identification methodology. Utility functionality associated with
-characterizing modal properties and behaviour is also included.
+The primary focus of this package is to provide funtionality to
+identify models of linear time-invariant systems.
+
+Additionally, the package has a class for stabilization diagrams for
+selecting modes interactively, a `spatial` module for establishing a
+spatial model of a structure and converting a mode shape vector to a
+deformation array for a higher order 3D mesh and a class for plotting
+and animating mode shapes on spatial models with matplotlib. Below is
+an animation of the first horizontal bending mode of the railway
+bridge at Hell, identified and animated by `strid` alone:
+
+|hell_animation|
 
 The code example below shows how the modes of a combined
 deterministic-stochastic system can be obtained from measurements of
@@ -67,7 +78,7 @@ the input `u` and the output `y`.
    # pick modes directly from the plot.
    # First, we must estimate modes for a range of different model orders
    modes = dict()
-   for order in range(5, 150, 5):
+   for order in range(5, 150, 1):
        A, C = csid.perform(order, 20)
        modes[order] = strid.Mode.find_modes_from_ss(A, C, csid.fs)
 
@@ -103,3 +114,4 @@ Create a branch, add commits, and
 
 
 .. |stab_plot| image:: https://github.com/Gunnstein/strid/blob/master/example.png
+.. |hell_animation| image:: https://github.com/Gunnstein/strid/blob/master/hell.gif
