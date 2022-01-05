@@ -13,7 +13,7 @@ __all__ = ["PolyReferenceLSCF", ]
 
 
 class PolyReferenceLSCF:
-    """Poly reference Least Square Complex Frequency estimator
+    """Poly reference Least Squares Complex Frequency-domain estimator
 
     Given a FRF matrix identify a right matrix fraction description
     (RMFD) of the system:
@@ -49,9 +49,9 @@ class PolyReferenceLSCF:
         Arguments
         ---------
         H : 3darray
-            FRF matrix (receptance) where the first dimension refers to the
-            frequency axis, second dimension to outputs and third
-            dimension to the inputs.
+            FRF matrix where the first and second axis refers to the
+            outputs and inputs, respectively and the third axis refers to the 
+            frequency.
         fs : float
             Sampling rate (Hz)
         sgn_exp_basis : {1, -1}, optional
@@ -269,9 +269,9 @@ def find_residues_lsfd(poles, H, fs):
     poles : 1darray
         Continous time poles (eigenvalues).
     H : 3darray
-        FRF matrix where the first dimension refers to the
-        frequency axis, second dimension to outputs and third
-        dimension to the inputs.
+        FRF matrix where the first and second axis refers to the
+            outputs and inputs, respectively and the third axis 
+            refers to the frequency.
     fs : float
         Sampling rate
 
