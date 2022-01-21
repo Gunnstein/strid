@@ -142,7 +142,7 @@ def mean_phase(u):
     u = np.asarray(u)
     U, s, VT = np.linalg.svd(np.c_[u.real, u.imag])
     V = VT.T
-    return np.arctan(-V[0, 1] / V[1, 1])
+    return np.arctan2(V[0, 1], -V[1, 1])
 
 
 def mean_phase_deviation(u):
