@@ -113,7 +113,7 @@ class TableModePicker(ModePicker):
         if len(self.picked) > 0:
             sorted_modes = self.picked
             cell_text = [
-                (f"{mode.f:.2f}Hz",
+                (f"{mode.f:.3f}Hz",
                  f"{mode.xi:.2%}",
                  f"{mode.mpc:.1%}",
                  f"{mode.mp/np.pi*180:.1f}°")
