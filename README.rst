@@ -1,3 +1,6 @@
+.. image:: https://zenodo.org/badge/242476045.svg
+   :target: https://zenodo.org/badge/latestdoi/242476045
+
 =====
 strid
 =====
