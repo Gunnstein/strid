@@ -419,7 +419,7 @@ class Node:
 
     """
     def __init__(self, coordinate):
-        self.coordinate = np.asfarray(coordinate)
+        self.coordinate = np.asarray(coordinate, dtype=float)
         self.dofs = [DOF(n) for n in range(3)]
 
 
@@ -591,7 +591,7 @@ class Mesh:
         raise StridError("Add mesh/meshes with the `add_mesh`/`add_meshes` method.")
 
     def add_meshes(self, meshlist):
-        self._meshes.extend(v)
+        self._meshes.extend(meshlist)
 
     def add_mesh(self, mesh):
         self._meshes.append(mesh)
@@ -609,7 +609,7 @@ class Mesh:
         self._nodes.extend(v)
 
     def translate(self, v):
-        u = np.asfarray(v)
+        u = np.asarray(v, dtype=float)
         for node in self.nodes:
             node.coordinate += u
 
@@ -623,7 +623,7 @@ class Mesh:
         return copy.deepcopy(self)
 
     def find_node_by_coordinate(self, coordinate):
-        c = np.asfarray(coordinate)
+        c = np.asarray(coordinate, dtype=float)
         nodes = [(node, np.linalg.norm(c-node.coordinate))
                  for node in self.nodes]
         nodes.sort(key=lambda x: x[1])
